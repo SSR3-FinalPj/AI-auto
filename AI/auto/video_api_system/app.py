@@ -113,8 +113,10 @@ async def youtube_prompts_from_env(env_data: YoutubeData):
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(PROMPT_ENDPOINT, json=payload.model_dump())
             r.raise_for_status()
-            data = r.json()
-            return PromptResponse(**data)
+        return {
+            "status": "success",
+            "message": "Youtube prompt request forwarded to prompt server"
+        }
 
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
@@ -151,8 +153,10 @@ async def reddit_prompts_from_env(env_data: RedditData):
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(PROMPT_ENDPOINT, json=payload.model_dump())
             r.raise_for_status()
-            data = r.json()
-            return PromptResponse(**data)
+        return {
+            "status": "success",
+            "message": "Reddit prompt request forwarded to prompt server"
+        }
 
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
@@ -194,6 +198,7 @@ async def handle_callback(callback_data : VideoCallbackRequest):
 if __name__ == "__main__":
     import uvicorn, os
     # 필요하면 기본 환경값도 세팅
-    os.environ.setdefault("PROMPT_SERVER_BASE", "http://127.0.0.1:8001")
+    os.environ.setdefault("PROMPT_SERVER_BASE", "http://127.0.0.1:8000")
+    os.environ.setdefault("JAVA_SERVER_BASE", "http://127.0.0.1:8080")
     # reload 쓰려면 "모듈경로:앱변수" 문자열 형태로!
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
