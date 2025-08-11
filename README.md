@@ -32,6 +32,7 @@ requests_body:
   "sixtyRate": 0,
   "seventyRate": 0
 }
+
 response:
 {
   "request_id": "string",
