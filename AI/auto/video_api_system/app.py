@@ -11,24 +11,24 @@ app = FastAPI(title="Bridge Server")
 PROMPT_SERVER_BASE = os.getenv("PROMPT_SERVER_BASE", "http://localhost:8001")
 PROMPT_ENDPOINT = f"{PROMPT_SERVER_BASE}/api/prompts"
 
-# ===== 자바에서 오는 원본 데이터 =====
+#원본 데이터(기본값 0으로 세팅)
 class EnvData(BaseModel):
-    areaName: str
-    temperature: int
-    humidity: int
-    uvIndex: int
-    congestionLevel: str
-    maleRate: int
-    femaleRate: int
-    teenRate: int
-    twentyRate: int
-    thirtyRate: int
-    fourtyRate: int
-    fiftyRate: int
-    sixtyRate: int
-    seventyRate: int
+    areaName: str = ""
+    temperature: float = 0.0
+    humidity: float = 0.0
+    uvIndex: float = 0.0
+    congestionLevel: str = ""
+    maleRate: float = 0.0
+    femaleRate: float = 0.0
+    teenRate: float = 0.0
+    twentyRate: float = 0.0
+    thirtyRate: float = 0.0
+    fourtyRate: float = 0.0
+    fiftyRate: float = 0.0
+    sixtyRate: float = 0.0
+    seventyRate: float = 0.0
 
-# ===== 프롬프트 서버에 보낼 Request/Response =====
+#Prompt Request&Response
 class PromptRequest(BaseModel):
     base_prompt_en: str
 
@@ -36,19 +36,21 @@ class PromptResponse(BaseModel):
     request_id: str
     prompts: str
 
+#기본 프롬프트
 def build_base_prompt_en(env: EnvData) -> str:
     """
     환경 데이터를 영어 문장으로 변환
     """
     return (
-        f"{env.areaName}, current temperature {env.temperature}°C, "
-        f"humidity {env.humidity}%, UV index {env.uvIndex}, congestion level {env.congestionLevel}, "
-        f"male ratio {env.maleRate}%, female ratio {env.femaleRate}%, "
-        f"age distribution: teens {env.teenRate}%, twenties {env.twentyRate}%, "
-        f"thirties {env.thirtyRate}%, forties {env.fourtyRate}%, fifties {env.fiftyRate}%, "
-        f"sixties {env.sixtyRate}%, seventies {env.seventyRate}%"
+        f"{env.areaName}, current temperature {env.temperature:.1f}°C, "
+        f"humidity {env.humidity:.1f}%, UV index {env.uvIndex:.1f}, congestion level {env.congestionLevel}, "
+        f"male ratio {env.maleRate:.1f}%, female ratio {env.femaleRate:.1f}%, "
+        f"age distribution: teens {env.teenRate:.1f}%, twenties {env.twentyRate:.1f}%, "
+        f"thirties {env.thirtyRate:.1f}%, forties {env.fourtyRate:.1f}%, fifties {env.fiftyRate:.1f}%, "
+        f"sixties {env.sixtyRate:.1f}%, seventies {env.seventyRate:.1f}%"
     )
 
+#프롬프트 생성
 @app.post("/api/generate-prompts", response_model=PromptResponse)
 async def generate_prompts_from_env(env_data: EnvData):
     """
