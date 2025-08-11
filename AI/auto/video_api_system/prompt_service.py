@@ -12,10 +12,10 @@ import requests
 COMFYUI_BASE = os.getenv("COMFYUI_BASE", "http://127.0.0.1:8188")
 COMFYUI_API_URL = f"{COMFYUI_BASE}/prompt"
 
-# 환경변수 없으면 기본 경로로 (원하면 반드시 환경변수로 덮어쓰기)
+# 환경변수 없으면 기본 경로
 WORKFLOW_PATH = os.getenv("WORKFLOW_PATH", r"D:\ComfyUI\workflows\testapi1.json")
 
-# 네 워크플로 JSON과 동일 (KSampler=3, positive=6, negative=7)
+# 워크플로 노드 ID (testapi1.json 기준: KSampler=3, positive=6, negative=7)
 KSAMPLER_ID = os.getenv("KSAMPLER_ID", "3")
 POS_TEXT_ID = os.getenv("POS_TEXT_ID", "6")
 NEG_TEXT_ID = os.getenv("NEG_TEXT_ID", "7")
@@ -29,14 +29,20 @@ DEFAULT_STAGES = ["morning", "afternoon", "golden hour", "twilight (light rain)"
 
 # ===== 요청/응답 모델 =====
 class PromptRequest(BaseModel):
-    base_prompt_en: str = Field(..., description="Base English prompt, e.g., 'Gyeongbokgung Palace, traditional Korean architecture'")
+    base_prompt_en: str = Field(..., description="Base English prompt")
     stages: Optional[List[str]] = None
     same_camera_angle: bool = True
     consistent_framing: bool = True
     timelapse_hint: bool = True
     negative_override: Optional[str] = None
 
-class PromptResponse(BaseModel):
+# /api/prompts 용(브리지 호환: prompts만 반환)
+class PromptOnlyResponse(BaseModel):
+    request_id: str
+    prompts: List[str]
+
+# 내부 테스트용(원하면 사용)
+class PromptResponseWithNegative(BaseModel):
     request_id: str
     prompts: List[str]
     negative: str
@@ -102,17 +108,16 @@ def _submit_to_comfyui(positive: str, negative: str) -> str:
     return pid
 
 # ===== 엔드포인트 =====
-@app.post("/api/prompts", response_model=PromptResponse)
+@app.post("/api/prompts", response_model=PromptOnlyResponse)
 def create_prompts(req: PromptRequest):
     stages = req.stages or DEFAULT_STAGES
     prompts = [
         build_prompt_line(req.base_prompt_en, stage, req.same_camera_angle, req.consistent_framing, req.timelapse_hint)
         for stage in stages
     ]
-    negative = req.negative_override or "low quality, blurry, distorted, bad lighting, watermark, poorly drawn"
-    return PromptResponse(request_id=str(uuid.uuid4()), prompts=prompts, negative=negative)
+    return PromptOnlyResponse(request_id=str(uuid.uuid4()), prompts=prompts)
 
-# 실행형 엔드포인트(별칭 2개 모두 제공)
+# 실행형 엔드포인트(별칭 2개 지원)
 @app.post("/api/prompts/generate", response_model=GenerateResponse)
 @app.post("/api/generate-prompts", response_model=GenerateResponse)
 def generate_and_run(req: GenerateRequest):
