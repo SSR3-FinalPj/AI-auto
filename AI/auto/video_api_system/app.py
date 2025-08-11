@@ -1,4 +1,4 @@
-# bridge_app.py
+# app.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict
@@ -9,7 +9,9 @@ import uuid
 app = FastAPI(title="Bridge Server")
 
 PROMPT_SERVER_BASE = os.getenv("PROMPT_SERVER_BASE", "http://localhost:8000")
+VIDEO_SERVER_BASE = os.getenv("VIDEO_SERVER_BASE", "http://localhost:8002")
 PROMPT_ENDPOINT = f"{PROMPT_SERVER_BASE}/api/prompts"
+VIDEO_ENDPOINT = f"{VIDEO_SERVER_BASE}/api/videos"
 
 #원본 데이터(기본값 0으로 세팅)
 class EnvData(BaseModel):
@@ -82,27 +84,31 @@ async def generate_prompts_from_env(env_data: EnvData):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class VideoCallbackRequest(BaseModel):
+    request_id: str
+    efsPath: str
+    durationSec: int
 
-# video_router = APIRouter(prefix="/api/videos", tags=["videos"])
+class VideoCallbackResponse(BaseModel):
+    request_id: str
+    efsPath: str
+    durationSec: int
 
-# class VideoCallbackRequest(BaseModel):
-#     promptId: str
-#     efsPath: str
-#     durationSec: int
+@app.get("/api/videos/callback")
+async def handle_callback(callback_data : VideoCallbackRequest):
+    try:
+        async with httpx.AsyncClient(timeout=100) as client:
+            payload = callback_data.model_dump()
+            r = await client.post(VIDEO_ENDPOINT, json=payload)
+            r.raise_for_status()
+            data = r.json
+            return VideoCallbackResponse(**data)
 
-# @video_router.post("/callback")
-# async def handle_callback(request: VideoCallbackRequest):
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Java server unreachable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-#     logging.info(
-#         f"Received video callback status: "
-#         f"promptId={request.promptId}"
-#         f"path={request.efsPath}"
-#     )
-
-# app = FastAPI(
-#     title="Video Generation API",
-#     description="API for creating prompts, generation videos, and handling callbacks",
-#     version="0.2.0"
-# )
-# app.include_router(prompt_router)
-# app.include_router(video_router)
+    
