@@ -8,7 +8,7 @@ import uuid
 
 app = FastAPI(title="Bridge Server")
 
-PROMPT_SERVER_BASE = os.getenv("PROMPT_SERVER_BASE", "http://localhost:8001")
+PROMPT_SERVER_BASE = os.getenv("PROMPT_SERVER_BASE", "http://localhost:8000")
 PROMPT_ENDPOINT = f"{PROMPT_SERVER_BASE}/api/prompts"
 
 #원본 데이터(기본값 0으로 세팅)
