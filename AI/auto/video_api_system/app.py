@@ -36,7 +36,7 @@ class PromptRequest(BaseModel):
 
 class PromptResponse(BaseModel):
     request_id: str
-    prompts: str
+    prompts: List[str]
 
 #기본 프롬프트
 def build_base_prompt_en(env: EnvData) -> str:
@@ -94,7 +94,7 @@ class VideoCallbackResponse(BaseModel):
     efsPath: str
     durationSec: int
 
-@app.get("/api/videos/callback")
+@app.post("/api/videos/callback")
 async def handle_callback(callback_data : VideoCallbackRequest):
     try:
         async with httpx.AsyncClient(timeout=100) as client:
@@ -111,4 +111,9 @@ async def handle_callback(callback_data : VideoCallbackRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    
+if __name__ == "__main__":
+    import uvicorn, os
+    # 필요하면 기본 환경값도 세팅
+    os.environ.setdefault("PROMPT_SERVER_BASE", "http://127.0.0.1:8001")
+    # reload 쓰려면 "모듈경로:앱변수" 문자열 형태로!
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
