@@ -16,19 +16,19 @@ VIDEO_ENDPOINT = f"{VIDEO_SERVER_BASE}/api/videos"
 #원본 데이터(기본값 0으로 세팅)
 class EnvData(BaseModel):
     areaName: str = ""
-    temperature: float = 0.0
-    humidity: float = 0.0
-    uvIndex: float = 0.0
+    temperature: str = ""
+    humidity: str = ""
+    uvIndex: str = ""
     congestionLevel: str = ""
-    maleRate: float = 0.0
-    femaleRate: float = 0.0
-    teenRate: float = 0.0
-    twentyRate: float = 0.0
-    thirtyRate: float = 0.0
-    fourtyRate: float = 0.0
-    fiftyRate: float = 0.0
-    sixtyRate: float = 0.0
-    seventyRate: float = 0.0
+    maleRate: str = ""
+    femaleRate: str = ""
+    teenRate: str = ""
+    twentyRate: str = ""
+    thirtyRate: str = ""
+    fourtyRate: str = ""
+    fiftyRate: str = ""
+    sixtyRate: str = ""
+    seventyRate: str = ""
 
 #Prompt Request&Response
 class PromptRequest(BaseModel):
@@ -44,12 +44,12 @@ def build_base_prompt_en(env: EnvData) -> str:
     환경 데이터를 영어 문장으로 변환
     """
     return (
-        f"{env.areaName}, current temperature {env.temperature:.1f}°C, "
-        f"humidity {env.humidity:.1f}%, UV index {env.uvIndex:.1f}, congestion level {env.congestionLevel}, "
-        f"male ratio {env.maleRate:.1f}%, female ratio {env.femaleRate:.1f}%, "
-        f"age distribution: teens {env.teenRate:.1f}%, twenties {env.twentyRate:.1f}%, "
-        f"thirties {env.thirtyRate:.1f}%, forties {env.fourtyRate:.1f}%, fifties {env.fiftyRate:.1f}%, "
-        f"sixties {env.sixtyRate:.1f}%, seventies {env.seventyRate:.1f}%"
+        f"{env.areaName}, current temperature {env.temperature}°C, "
+        f"humidity {env.humidity}%, UV index {env.uvIndex}, congestion level {env.congestionLevel}, "
+        f"male ratio {env.maleRate}%, female ratio {env.femaleRate}%, "
+        f"age distribution: teens {env.teenRate}%, twenties {env.twentyRate}%, "
+        f"thirties {env.thirtyRate}%, forties {env.fourtyRate}%, fifties {env.fiftyRate}%, "
+        f"sixties {env.sixtyRate}%, seventies {env.seventyRate}%"
     )
 
 #프롬프트 생성
