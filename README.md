@@ -6,4 +6,6 @@ python version : 3.12.7
 ##### 설치
 pip install fastapi "uvicorn[standard]" httpx "pydantic>=2"
 
+##### 실행
+py -m uvicorn app:app --port 8000 --reload
 
