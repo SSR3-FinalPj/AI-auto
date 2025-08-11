@@ -19,19 +19,19 @@ requests_body:
 ```
 {
   "areaName": "",
-  "temperature": 0,
-  "humidity": 0,
-  "uvIndex": 0,
+  "temperature": "",
+  "humidity": "",
+  "uvIndex": "",
   "congestionLevel": "",
-  "maleRate": 0,
-  "femaleRate": 0,
-  "teenRate": 0,
-  "twentyRate": 0,
-  "thirtyRate": 0,
-  "fourtyRate": 0,
-  "fiftyRate": 0,
-  "sixtyRate": 0,
-  "seventyRate": 0
+  "maleRate": "",
+  "femaleRate": "",
+  "teenRate": "",
+  "twentyRate": "",
+  "thirtyRate": "",
+  "fourtyRate": "",
+  "fiftyRate": "",
+  "sixtyRate": "",
+  "seventyRate": ""
 }
 ```
 
