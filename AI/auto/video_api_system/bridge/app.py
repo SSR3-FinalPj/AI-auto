@@ -2,6 +2,8 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict
+from schemas import EnvData, PromptRequest, PromptResponse, ActPromptRequest, build_base_prompt_en
+from schemas import YoutubeData, RedditData, VideoCallbackRequest, VideoCallbackResponse
 import httpx
 import os
 import uuid
@@ -13,48 +15,6 @@ VIDEO_SERVER_BASE = os.getenv("VIDEO_SERVER_BASE", "http://localhost:8002")
 PROMPT_ENDPOINT = f"{PROMPT_SERVER_BASE}/api/prompts"
 VIDEO_ENDPOINT = f"{VIDEO_SERVER_BASE}/api/videos"
 
-#원본 날씨 데이터(기본값 ""으로 세팅)
-class EnvData(BaseModel):
-    areaName: str = ""
-    temperature: str = ""
-    humidity: str = ""
-    uvIndex: str = ""
-    congestionLevel: str = ""
-    maleRate: str = ""
-    femaleRate: str = ""
-    teenRate: str = ""
-    twentyRate: str = ""
-    thirtyRate: str = ""
-    fourtyRate: str = ""
-    fiftyRate: str = ""
-    sixtyRate: str = ""
-    seventyRate: str = ""
-
-#Prompt Request&Response
-class PromptRequest(BaseModel):
-    base_prompt_en: str
-
-#반응 데이터 Request
-class ActPromptRequest(BaseModel):
-    act_base_prompt: Dict[str, str]
-
-class PromptResponse(BaseModel):
-    request_id: str
-    prompts: List[str]
-
-#기본 프롬프트 생성
-def build_base_prompt_en(env: EnvData) -> str:
-    """
-    환경 데이터를 영어 문장으로 변환
-    """
-    return (
-        f"{env.areaName}, current temperature {env.temperature}°C, "
-        f"humidity {env.humidity}%, UV index {env.uvIndex}, congestion level {env.congestionLevel}, "
-        f"male ratio {env.maleRate}%, female ratio {env.femaleRate}%, "
-        f"age distribution: teens {env.teenRate}%, twenties {env.twentyRate}%, "
-        f"thirties {env.thirtyRate}%, forties {env.fourtyRate}%, fifties {env.fiftyRate}%, "
-        f"sixties {env.sixtyRate}%, seventies {env.seventyRate}%"
-    )
 
 #프롬프트 생성 요청& 응답 프롬프트 
 @app.post("/api/generate-prompts", response_model=PromptResponse)
@@ -87,25 +47,11 @@ async def generate_prompts_from_env(env_data: EnvData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#유튜브 반응데이터 
-class YoutubeData(BaseModel):
-    areaName: str = ""
-    temperature: str = ""
-    humidity: str = ""
-    uvIndex: str = ""
-    congestionLevel: str = ""
-    maleRate: str = ""
-    femaleRate: str = ""
-    teenRate: str = ""
-    twentyRate: str = ""
-    thirtyRate: str = ""
-    fourtyRate: str = ""
-    fiftyRate: str = ""
-    sixtyRate: str = ""
-    seventyRate: str = ""
+#==========================================================================================
+
 
 #유튜브 반응데이터 프롬프트에 전달
-@app.post("/api/youtube-prompts")
+@app.post("/api/youtube-to-prompts")
 async def youtube_prompts_from_env(env_data: YoutubeData):
 
     #프롬프트 서버 요청 페이로드
@@ -130,25 +76,9 @@ async def youtube_prompts_from_env(env_data: YoutubeData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#레딧 반응데이터 
-class RedditData(BaseModel):
-    areaName: str = ""
-    temperature: str = ""
-    humidity: str = ""
-    uvIndex: str = ""
-    congestionLevel: str = ""
-    maleRate: str = ""
-    femaleRate: str = ""
-    teenRate: str = ""
-    twentyRate: str = ""
-    thirtyRate: str = ""
-    fourtyRate: str = ""
-    fiftyRate: str = ""
-    sixtyRate: str = ""
-    seventyRate: str = ""
 
 #레딧 반응데이터 프롬프트에 전달 
-@app.post("/api/reddit-prompts")
+@app.post("/api/reddit-to-prompts")
 async def reddit_prompts_from_env(env_data: RedditData):
 
     #프롬프트 서버 요청 페이로드
@@ -175,19 +105,8 @@ async def reddit_prompts_from_env(env_data: RedditData):
 
 # 영상 생성 완료 데이터 ==============================================================================
 
-#영상 생성 완료 callback request&response
-class VideoCallbackRequest(BaseModel):
-    request_id: str
-    efsPath: str
-    durationSec: int
-
-class VideoCallbackResponse(BaseModel):
-    request_id: str
-    efsPath: str
-    durationSec: int
-
 #영상생성완료 callback 데이터 전달 
-@app.post("/api/videos/callback")
+@app.post("/api/videos/callback", response_model=VideoCallbackResponse)
 async def handle_callback(callback_data : VideoCallbackRequest):
     
     #영상 서버 호출
