@@ -6,6 +6,9 @@ import threading
 from pathlib import Path
 from typing import Set
 import paramiko
+from typing import Dict, Optional
+from fastapi import FastAPI, requests, HTTPException
+from pydantic import Field
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -228,13 +231,13 @@ class CompleteAPIRequest(BaseModel):
     file_path: Optional[str] = Field(None, description="로컬 파일 경로 (미지정 시 최신 영상 자동 선택)")
     remote_dir: Optional[str] = Field(None, description=f"원격 디렉터리(기본: {REMOTE_DIR})")
     file_name: Optional[str] = Field(None, description="원격 저장 파일명(기본: 로컬 파일명)")
-    extra: Optional[Dict[str, Any]] = Field(None, description="추가 전송 메타데이터")
+    extra: Optional[Dict[str, any]] = Field(None, description="추가 전송 메타데이터")
 
 class CompleteAPIResponse(BaseModel):
     ok: bool
     webhook_url: Optional[str] = None
     webhook_status: Optional[int] = None
-    payload: Dict[str, Any]
+    payload: Dict[str, any]
 
 def _pick_latest_video() -> Path:
     candidates = [p for p in LOCAL_DIR.glob("*") if p.suffix.lower() in ALLOW_EXT and p.is_file()]

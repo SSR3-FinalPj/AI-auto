@@ -1,7 +1,8 @@
 # app.py
-from fastapi import FastAPI, HTTPException
-from schemas import EnvData, PromptRequest, PromptResponse, ActPromptRequest, build_base_prompt_en
-from schemas import YoutubeData, RedditData, VideoCallbackRequest, VideoCallbackResponse
+from fastapi import FastAPI, Body, HTTPException
+from schemas import PromptRequest, PromptResponse, build_base_prompt_en, ActPromptRequest
+from schemas import VideoCallbackRequest, VideoCallbackResponse
+from typing import List, Dict
 import httpx
 import os
 import uuid
@@ -16,82 +17,27 @@ VIDEO_ENDPOINT = f"{VIDEO_SERVER_BASE}/api/videos"
 
 #프롬프트 생성 요청& 응답 프롬프트 
 @app.post("/api/generate-prompts", response_model=PromptResponse)
-async def generate_prompts_from_env(env_data: EnvData):
+async def generate_prompts_from_env(payload: Dict[str, any] = Body(...)):
     """
     1. 자바에서 dict 형태로 받은 환경 데이터를 영어 프롬프트 문장으로 변환
     2. 프롬프트 서버 `/api/prompts` 호출
     3. 응답을 그대로 반환
     """
-    # 1) base_prompt_en 생성
-    base_prompt = build_base_prompt_en(env_data)
+    # # 1) base_prompt_en 생성
+    base_prompt = build_base_prompt_en(payload)
 
     # 2) 프롬프트 서버 요청 페이로드 구성
-    payload = PromptRequest(
+    req = PromptRequest(
         base_prompt_en=base_prompt
     )
 
     # 3) 프롬프트 서버 호출
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(PROMPT_ENDPOINT, json=payload.model_dump())
+            r = await client.post(PROMPT_ENDPOINT, json=req.model_dump())
             r.raise_for_status()
             data = r.json()
             return PromptResponse(**data)
-
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"Prompt server unreachable: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-#==========================================================================================
-
-#유튜브 반응데이터 프롬프트에 전달
-@app.post("/api/youtube-to-prompts")
-async def youtube_prompts_from_env(env_data: YoutubeData):
-
-    #프롬프트 서버 요청 페이로드
-    payload = ActPromptRequest(
-        act_base_prompt = env_data.model_dump()
-    )
-
-    #프롬프트 서버 호출
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(PROMPT_ENDPOINT, json=payload.model_dump())
-            r.raise_for_status()
-        return {
-            "status": "success",
-            "message": "Youtube prompt request forwarded to prompt server"
-        }
-
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"Prompt server unreachable: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-#레딧 반응데이터 프롬프트에 전달 
-@app.post("/api/reddit-to-prompts")
-async def reddit_prompts_from_env(env_data: RedditData):
-
-    #프롬프트 서버 요청 페이로드
-    payload = ActPromptRequest(
-        act_base_prompt = env_data.model_dump()
-    )
-
-    #프롬프트 서버 호출
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(PROMPT_ENDPOINT, json=payload.model_dump())
-            r.raise_for_status()
-        return {
-            "status": "success",
-            "message": "Reddit prompt request forwarded to prompt server"
-        }
 
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
