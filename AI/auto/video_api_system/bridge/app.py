@@ -1,7 +1,5 @@
 # app.py
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict
 from schemas import EnvData, PromptRequest, PromptResponse, ActPromptRequest, build_base_prompt_en
 from schemas import YoutubeData, RedditData, VideoCallbackRequest, VideoCallbackResponse
 import httpx
@@ -48,7 +46,6 @@ async def generate_prompts_from_env(env_data: EnvData):
         raise HTTPException(status_code=500, detail=str(e))
 
 #==========================================================================================
-
 
 #유튜브 반응데이터 프롬프트에 전달
 @app.post("/api/youtube-to-prompts")
