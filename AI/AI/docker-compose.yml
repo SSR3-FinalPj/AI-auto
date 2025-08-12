@@ -1,0 +1,9 @@
+version : "3.8"
+services:
+  prompt:
+    build: 
+      context: ./prompt
+    image: prompt_app:local
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8001:8001"
