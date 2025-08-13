@@ -1,0 +1,11 @@
+version : "3.8"
+services:
+  bridge:
+    build: 
+      context: ./bridge
+    image: bridge_app:local
+    environment:
+      - PROMPT_SERVER_BASE=http://prompt:8001
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
