@@ -4,15 +4,14 @@ import json
 import hashlib
 import threading
 from pathlib import Path
-from typing import Set
 import paramiko
-from typing import Dict, Optional
+from typing import Dict, Optional, Set, Any
 from fastapi import FastAPI, requests, HTTPException
-from pydantic import Field
+from pydantic import Field, BaseModel
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# # ===== 사용자 설정 =====
+# ===== 사용자 설정 =====
 # HOST = "s-xxxxxxxx.server.transfer.ap-northeast-2.amazonaws.com"  # Transfer Family SFTP 엔드포인트
 # PORT = 22
 # USER = "comfyuser"                                                # Transfer Family 사용자
@@ -29,6 +28,10 @@ KEY_PATH = r"C:\Users\<내계정>\.ssh\id_ed25519_local_sftp"  # 개인키(.pub 
 REMOTE_DIR = "/upload"                                      # 컨테이너 내부 경로
 LOCAL_DIR  = r"D:\ComfyUI\ComfyUI\output"                   # ComfyUI 출력 폴더(예시)
 
+# # === 추가: 웹훅/URL/자동알림 ===
+# WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")                 # ex) http://localhost:8080/api/video-callback
+# MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "")           # ex) http://localhost:8000/media
+# AUTO_NOTIFY = os.getenv("AUTO_NOTIFY", "false").lower() == "true"
 
 # ===== 유틸 =====
 LOCK = threading.Lock()
@@ -231,13 +234,13 @@ class CompleteAPIRequest(BaseModel):
     file_path: Optional[str] = Field(None, description="로컬 파일 경로 (미지정 시 최신 영상 자동 선택)")
     remote_dir: Optional[str] = Field(None, description=f"원격 디렉터리(기본: {REMOTE_DIR})")
     file_name: Optional[str] = Field(None, description="원격 저장 파일명(기본: 로컬 파일명)")
-    extra: Optional[Dict[str, any]] = Field(None, description="추가 전송 메타데이터")
+    extra: Optional[Dict[str, Any]] = Field(None, description="추가 전송 메타데이터")
 
 class CompleteAPIResponse(BaseModel):
     ok: bool
     webhook_url: Optional[str] = None
     webhook_status: Optional[int] = None
-    payload: Dict[str, any]
+    payload: Dict[str, Any]
 
 def _pick_latest_video() -> Path:
     candidates = [p for p in LOCAL_DIR.glob("*") if p.suffix.lower() in ALLOW_EXT and p.is_file()]

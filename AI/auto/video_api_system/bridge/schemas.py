@@ -33,17 +33,27 @@ class PromptResponse(BaseModel):
 #기본 프롬프트 생성(날씨데이터용)
 def build_base_prompt_en(data) -> str:
     weatenv = data["weather"]
+    youtenv = data["youtube"]
+    reddenv = data["reddit"]
     """
     데이터를 영어 문장으로 변환
     """
-    return (
-        f"{data.weather}, current temperature {env.temperature}°C, "
-        f"humidity {env.humidity}%, UV index {env.uvIndex}, congestion level {env.congestionLevel}, "
-        f"male ratio {env.maleRate}%, female ratio {env.femaleRate}%, "
-        f"age distribution: teens {env.teenRate}%, twenties {env.twentyRate}%, "
-        f"thirties {env.thirtyRate}%, forties {env.fourtyRate}%, fifties {env.fiftyRate}%, "
-        f"sixties {env.sixtyRate}%, seventies {env.seventyRate}%"
+    weather = (
+        f"[weather]: {weatenv.areaname}, current temperature {weatenv.temperature}°C, "
+        f"humidity {weatenv.humidity}%, UV index {weatenv.uvIndex}, congestion level {weatenv.congestionLevel}, "
+        f"male ratio {weatenv.maleRate}%, female ratio {weatenv.femaleRate}%, "
+        f"age distribution: teens {weatenv.teenRate}%, twenties {weatenv.twentyRate}%, "
+        f"thirties {weatenv.thirtyRate}%, forties {weatenv.fourtyRate}%, fifties {weatenv.fiftyRate}%, "
+        f"sixties {weatenv.sixtyRate}%, seventies {weatenv.seventyRate}%"
     )
+    youtube = (
+        f"{youtenv}"
+    )
+    reddit = (
+        f"{reddenv}"
+    )
+    return weather + youtube + reddit
+    
 
 #영상 생성 완료 callback request&response
 class VideoCallbackRequest(BaseModel):
