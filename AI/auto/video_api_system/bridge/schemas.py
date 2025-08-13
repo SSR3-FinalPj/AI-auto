@@ -32,26 +32,33 @@ class PromptResponse(BaseModel):
 
 #기본 프롬프트 생성(날씨데이터용)
 def build_base_prompt_en(data) -> str:
-    weatenv = data["weather"]
-    youtenv = data["youtube"]
-    reddenv = data["reddit"]
+    weather=""
+    youtube=""
+    reddit=""
     """
     데이터를 영어 문장으로 변환
     """
-    weather = (
+    if data["weather"]:
+        weatenv = data["weather"]
+        weather = (
         f"[weather]: {weatenv.areaname}, current temperature {weatenv.temperature}°C, "
         f"humidity {weatenv.humidity}%, UV index {weatenv.uvIndex}, congestion level {weatenv.congestionLevel}, "
         f"male ratio {weatenv.maleRate}%, female ratio {weatenv.femaleRate}%, "
         f"age distribution: teens {weatenv.teenRate}%, twenties {weatenv.twentyRate}%, "
         f"thirties {weatenv.thirtyRate}%, forties {weatenv.fourtyRate}%, fifties {weatenv.fiftyRate}%, "
         f"sixties {weatenv.sixtyRate}%, seventies {weatenv.seventyRate}%"
-    )
-    youtube = (
+        )
+    if data["youtube"]:
+        youtenv = data["youtube"]
+        youtube = (
         f"{youtenv}"
-    )
-    reddit = (
+        )
+    if data["reddit"]:
+        reddenv = data["reddit"]
+        reddit = (
         f"{reddenv}"
-    )
+        )
+    
     return weather + youtube + reddit
     
 
