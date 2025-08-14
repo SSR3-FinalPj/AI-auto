@@ -1,68 +1,65 @@
-from pydantic import BaseModel
-from typing import List, Dict, Any
+# schemas.py (권장 정본)
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
 
-# #원본 날씨 데이터(기본값 ""으로 세팅)
-# class EnvData(BaseModel):
-#     areaName: str = ""
-#     temperature: str = ""
-#     humidity: str = ""
-#     uvIndex: str = ""
-#     congestionLevel: str = ""
-#     maleRate: str = ""
-#     femaleRate: str = ""
-#     teenRate: str = ""
-#     twentyRate: str = ""
-#     thirtyRate: str = ""
-#     fourtyRate: str = ""
-#     fiftyRate: str = ""
-#     sixtyRate: str = ""
-#     seventyRate: str = ""
-
-#Prompt Request&Response
+# 프롬프트 서버에 보낼 요청 스키마 (문자열 기반)
 class PromptRequest(BaseModel):
-    base_prompt_en: Dict[str, Any]
-
-# #반응 데이터 Request
-# class ActPromptRequest(BaseModel):
-#     act_base_prompt: Dict[str, str]
+    base_prompt_en: str = Field(..., description="Base English prompt")
+    stages: Optional[List[str]] = None
+    same_camera_angle: bool = True
+    consistent_framing: bool = True
+    timelapse_hint: bool = True
+    negative_override: Optional[str] = None
 
 class PromptResponse(BaseModel):
     request_id: str
     prompts: List[str]
+    negative: str
 
-#기본 프롬프트 생성(날씨데이터용)
-def build_base_prompt_en(data) -> str:
-    weather=""
-    youtube=""
-    reddit=""
-    """
-    데이터를 영어 문장으로 변환
-    """
-    if data["weather"]:
-        weatenv = data["weather"]
+# (선택) 자바에서 넘어온 원시 데이터 → 영어 문장 변환기
+def build_base_prompt_en(data: Dict[str, Any]) -> str:
+    weather = ""
+    youtube = ""
+    reddit = ""
+
+    w = data.get("weather")
+    if w:
+        # 딕셔너리 키 접근 + 케이스 일치
+        # areaName / temperature / humidity ... 키를 실제 자바 JSON에 맞춰 조정
+        area = w.get("areaName", "")
+        temp = w.get("temperature", "")
+        hum  = w.get("humidity", "")
+        uvi  = w.get("uvIndex", "")
+        cong = w.get("congestionLevel", "")
+        male = w.get("maleRate", "")
+        female = w.get("femaleRate", "")
+        teen = w.get("teenRate", "")
+        twenty = w.get("twentyRate", "")
+        thirty = w.get("thirtyRate", "")
+        fourty = w.get("fourtyRate", "")
+        fifty = w.get("fiftyRate", "")
+        sixty = w.get("sixtyRate", "")
+        seventy = w.get("seventyRate", "")
         weather = (
-        f"[weather]: {weatenv.areaname}, current temperature {weatenv.temperature}°C, "
-        f"humidity {weatenv.humidity}%, UV index {weatenv.uvIndex}, congestion level {weatenv.congestionLevel}, "
-        f"male ratio {weatenv.maleRate}%, female ratio {weatenv.femaleRate}%, "
-        f"age distribution: teens {weatenv.teenRate}%, twenties {weatenv.twentyRate}%, "
-        f"thirties {weatenv.thirtyRate}%, forties {weatenv.fourtyRate}%, fifties {weatenv.fiftyRate}%, "
-        f"sixties {weatenv.sixtyRate}%, seventies {weatenv.seventyRate}%"
+            f"[weather]: {area}, current temperature {temp}°C, "
+            f"humidity {hum}%, UV index {uvi}, congestion level {cong}, "
+            f"male ratio {male}%, female ratio {female}%, "
+            f"age distribution: teens {teen}%, twenties {twenty}%, "
+            f"thirties {thirty}%, forties {fourty}%, fifties {fifty}%, "
+            f"sixties {sixty}%, seventies {seventy}%"
         )
-    if data["youtube"]:
-        youtenv = data["youtube"]
-        youtube = (
-        f"{youtenv}"
-        )
-    if data["reddit"]:
-        reddenv = data["reddit"]
-        reddit = (
-        f"{reddenv}"
-        )
-    
-    return weather + youtube + reddit
-    
 
-#영상 생성 완료 callback request&response
+    y = data.get("youtube")
+    if y:
+        youtube = f" [youtube]: {y}"
+
+    r = data.get("reddit")
+    if r:
+        reddit = f" [reddit]: {r}"
+
+    return (weather + youtube + reddit).strip()
+
+# 콜백
 class VideoCallbackRequest(BaseModel):
     request_id: str
     efsPath: str

@@ -1,11 +1,36 @@
-version : "3.8"
 services:
+  # 프롬프트 서버 (prompt_service2.py) - 포트 8001
+  prompt:
+    build:
+      context: ./bridge
+    image: prompt_app:local
+    environment:
+      # 컨테이너 내부에서 보이는 워크플로 JSON 경로
+      - WORKFLOW_PATH=/app/workflows/testapi1.json
+      # 호스트(윈도우)에서 8188 포트로 실행 중인 ComfyUI에 접근
+      - COMFYUI_BASE=http://host.docker.internal:8188
+      # (워플 JSON의 노드 ID와 맞춰 필요 시 수정)
+      - KSAMPLER_ID=3
+      - POS_TEXT_ID=6
+      - NEG_TEXT_ID=7
+    volumes:
+      # 왼쪽: 호스트 파일, 오른쪽: 컨테이너 내부 경로 (읽기전용)
+      - "D:/ComfyUI/workflows/testapi1.json:/app/workflows/testapi1.json:ro"
+    command: uvicorn prompt_service2:app --host 0.0.0.0 --port 8001 --reload
+    ports:
+      - "8001:8001"
+
+  # 브리지 서버 (app.py) - 포트 8000
   bridge:
-    build: 
+    build:
       context: ./bridge
     image: bridge_app:local
     environment:
+      # 브리지가 프롬프트 서버로 붙는 내부 DNS 주소(서비스명:포트)
       - PROMPT_SERVER_BASE=http://prompt:8001
+      # (선택) 영상 서버 쓰면 필요: - VIDEO_SERVER_BASE=http://video:8002
     command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
+    depends_on:
+      - prompt
