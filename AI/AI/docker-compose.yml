@@ -4,6 +4,6 @@ services:
     build: 
       context: ./prompt
     image: prompt_app:local
-    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn prompt_service:app --host 0.0.0.0 --port 8001 --reload
     ports:
       - "8001:8001"
