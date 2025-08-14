@@ -1,8 +1,8 @@
 # app.py
 from fastapi import FastAPI, Body, HTTPException
-from schemas import PromptRequest, PromptResponse, build_base_prompt_en, ActPromptRequest
+from schemas import PromptRequest, PromptResponse, build_base_prompt_en#, ActPromptRequest
 from schemas import VideoCallbackRequest, VideoCallbackResponse
-from typing import List, Dict
+from typing import List, Dict, Any
 import httpx
 import os
 import uuid
@@ -17,7 +17,7 @@ VIDEO_ENDPOINT = f"{VIDEO_SERVER_BASE}/api/videos"
 
 #프롬프트 생성 요청& 응답 프롬프트 
 @app.post("/api/generate-prompts", response_model=PromptResponse)
-async def generate_prompts_from_env(payload: Dict[str, any] = Body(...)):
+async def generate_prompts_from_env(payload: Dict[str, Any] = Body(...)):
     """
     1. 자바에서 dict 형태로 받은 환경 데이터를 영어 프롬프트 문장으로 변환
     2. 프롬프트 서버 `/api/prompts` 호출

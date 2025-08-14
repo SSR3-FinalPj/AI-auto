@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Any
 
 # #원본 날씨 데이터(기본값 ""으로 세팅)
 # class EnvData(BaseModel):
@@ -20,7 +20,7 @@ from typing import List, Dict
 
 #Prompt Request&Response
 class PromptRequest(BaseModel):
-    base_prompt_en: Dict[str, any]
+    base_prompt_en: Dict[str, Any]
 
 # #반응 데이터 Request
 # class ActPromptRequest(BaseModel):
