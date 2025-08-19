@@ -1,6 +1,6 @@
 # schemas.py (권장 정본)
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 # 프롬프트 서버에 보낼 요청 스키마 (문자열 기반)
 class PromptRequest(BaseModel):
@@ -13,14 +13,15 @@ class PromptRequest(BaseModel):
 
 class PromptResponse(BaseModel):
     request_id: str
-    prompts: List[str]
-    negative: str
+    prompt_ids: List[str]
+    history_urls: List[str]
 
 # (선택) 자바에서 넘어온 원시 데이터 → 영어 문장 변환기
 def build_base_prompt_en(data: Dict[str, Any]) -> str:
     weather = ""
     youtube = ""
     reddit = ""
+    user = ""
 
     w = data.get("weather")
     if w:
@@ -56,16 +57,36 @@ def build_base_prompt_en(data: Dict[str, Any]) -> str:
     r = data.get("reddit")
     if r:
         reddit = f" [reddit]: {r}"
+    
+    u = data.get("user")
+    if u:
+        user = f" [user]: {u}"
 
-    return (weather + youtube + reddit).strip()
+    return (weather + youtube + reddit + user).strip()
+
 
 # 콜백
 class VideoCallbackRequest(BaseModel):
     request_id: str
     efsPath: str
     durationSec: int
+    prompt : str
 
 class VideoCallbackResponse(BaseModel):
     request_id: str
     efsPath: str
     durationSec: int
+    prompt : str
+
+def _pick(cb: Dict[str, Any], keys):
+    for k in keys:
+        v = cb.get(k)
+        if v is not None:
+            return v
+    return None
+
+def delivery_report(err, msg):
+    if err is not None:
+        print(f"Delivery failed: {err}")
+    else:
+        print(f"Message delivered to {msg.topic()} [{msg.partition()}] at offset {msg.offset()}")
