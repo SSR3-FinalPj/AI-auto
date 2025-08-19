@@ -12,14 +12,14 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 # ===== 사용자 설정 =====
-# HOST = "s-xxxxxxxx.server.transfer.ap-northeast-2.amazonaws.com"  # Transfer Family SFTP 엔드포인트
-# PORT = 22
-# USER = "comfyuser"                                                # Transfer Family 사용자
-# KEY_PATH = r"C:\path\to\id_rsa"                                   # 개인키 경로(또는 .ppk 변환 X, OpenSSH 키 권장)
-# LOCAL_DIR = Path(r"D:\ComfyUI\ComfyUI\output")                     # ComfyUI 출력 폴더
-# REMOTE_DIR = "/comfyui"                                            # EFS의 업로드 대상 디렉토리(홈디렉토리와 일치 권장)
-# ALLOW_EXT = {".mp4", ".mov"}                                       # 필요 시 확장자 추가
-# STATE_FILE = Path("./uploaded_state.json")                         # 업로드 이력 저장
+HOST = "s-xxxxxxxx.server.transfer.ap-northeast-2.amazonaws.com"  # Transfer Family SFTP 엔드포인트
+PORT = 22
+USER = "comfyuser"                                                # Transfer Family 사용자
+KEY_PATH = r"C:\path\to\id_rsa"                                   # 개인키 경로(또는 .ppk 변환 X, OpenSSH 키 권장)
+LOCAL_DIR = Path(r"D:\ComfyUI\ComfyUI\output")                     # ComfyUI 출력 폴더
+REMOTE_DIR = "/comfyui"                                            # EFS의 업로드 대상 디렉토리(홈디렉토리와 일치 권장)
+ALLOW_EXT = {".mp4", ".mov"}                                       # 필요 시 확장자 추가
+STATE_FILE = Path("./uploaded_state.json")                         # 업로드 이력 저장
 
 HOST = "127.0.0.1"
 PORT = 2222
@@ -28,10 +28,10 @@ KEY_PATH = r"C:\Users\<내계정>\.ssh\id_ed25519_local_sftp"  # 개인키(.pub 
 REMOTE_DIR = "/upload"                                      # 컨테이너 내부 경로
 LOCAL_DIR  = r"D:\ComfyUI\ComfyUI\output"                   # ComfyUI 출력 폴더(예시)
 
-# # === 추가: 웹훅/URL/자동알림 ===
-# WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")                 # ex) http://localhost:8080/api/video-callback
-# MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "")           # ex) http://localhost:8000/media
-# AUTO_NOTIFY = os.getenv("AUTO_NOTIFY", "false").lower() == "true"
+# === 추가: 웹훅/URL/자동알림 ===
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")                 # ex) http://localhost:8080/api/video-callback
+MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "")           # ex) http://localhost:8000/media
+AUTO_NOTIFY = os.getenv("AUTO_NOTIFY", "false").lower() == "true"
 
 # ===== 유틸 =====
 LOCK = threading.Lock()
