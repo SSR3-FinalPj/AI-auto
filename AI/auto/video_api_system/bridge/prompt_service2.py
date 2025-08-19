@@ -6,6 +6,9 @@ import logging
 from typing import List
 from fastapi import FastAPI, HTTPException
 import requests
+from prompts_resend_router import router as prompts_resend_router
+from prompt_store import save_prompt_record
+
 
 # app.py와 스키마(계약) 일치: 중복 정의 제거
 from schemas import PromptRequest, PromptResponse  # app.py와 동일 스키마 사용
@@ -25,6 +28,7 @@ NEG_TEXT_ID = os.getenv("NEG_TEXT_ID", "7")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 app = FastAPI(title="Prompt Service")
+app.include_router(prompts_resend_router)
 
 # ===== 기본 타임랩스 단계 =====
 DEFAULT_STAGES = ["morning", "afternoon", "golden hour", "twilight (light rain)", "rainy night"]
@@ -108,9 +112,11 @@ def create_prompts(req: PromptRequest):
         for stage in stages
     ]
     negative = req.negative_override or "low quality, blurry, distorted, bad lighting, watermark, poorly drawn"
+    request_id = str(uuid.uuid4())
+    save_prompt_record(request_id, prompts, negative)
 
     return PromptResponse(
-        request_id=str(uuid.uuid4()),
+        request_id=request_id,
         prompts=prompts,
         negative=negative
     )
