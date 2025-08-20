@@ -11,7 +11,7 @@ from prompt_store import save_prompt_record
 
 
 # app.py와 스키마(계약) 일치: 중복 정의 제거
-from schemas import PromptRequest, PromptResponse  # app.py와 동일 스키마 사용
+from schemas import PromptRequest, PromptCreateResponse, PromptGenerateResponse
 
 # ===== 설정 =====
 COMFYUI_BASE = os.getenv("COMFYUI_BASE", "http://127.0.0.1:8188")
@@ -99,7 +99,7 @@ def _submit_to_comfyui(positive: str, negative: str) -> str:
     return pid
 
 # ===== 엔드포인트 =====
-@app.post("/api/prompts", response_model=PromptResponse)
+@app.post("/api/prompts", response_model=PromptCreateResponse)
 def create_prompts(req: PromptRequest):
     """
     브리지(app.py)가 호출하는 계약(Contract) 엔드포인트.
@@ -115,13 +115,13 @@ def create_prompts(req: PromptRequest):
     request_id = str(uuid.uuid4())
     save_prompt_record(request_id, prompts, negative)
 
-    return PromptResponse(
+    return PromptCreateResponse(
         request_id=request_id,
         prompts=prompts,
         negative=negative
     )
 
-@app.post("/api/prompts/generate", response_model=GenerateResponse)
+@app.post("/api/prompts/generate", response_model=PromptGenerateResponse)
 def generate_and_run(req: PromptRequest):
     """
     (선택) 프롬프트 생성 + ComfyUI 실행까지 처리.
@@ -143,7 +143,7 @@ def generate_and_run(req: PromptRequest):
         prompt_ids.append(pid)
         history_urls.append(f"{COMFYUI_BASE}/history/{pid}")
 
-    return GenerateResponse(
+    return PromptGenerateResponse(
         request_id=str(uuid.uuid4()),
         prompt_ids=prompt_ids,
         history_urls=history_urls
