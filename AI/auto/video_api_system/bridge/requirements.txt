@@ -3,3 +3,4 @@ uvicorn[standard]>=0.30
 httpx>=0.27
 requests>=2.31
 pydantic>=2.6
+confluent-kafka>=2.4

@@ -155,6 +155,7 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP")
 KAFKA_TOPIC      = os.getenv("KAFKA_TOPIC", "video-callback")
 TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))       # 24h
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))  # 기본 1개(순차)
+SERIALIZE_BY_CALLBACK = True  # 완료 콜백을 기다린 뒤에만 다음 잡으로
 
 # Kafka 안전 설정(idempotent producer)
 producer_conf = {
@@ -246,22 +247,26 @@ def produce_kafka(event_key: str, value: dict):
 # -------------------
 def worker_loop():
     while True:
-        job = job_queue.get()  # blocks
-        # retry meta
+        job = job_queue.get()
         attempts = job.get("_attempts", 0)
         req_id = job["request_id"]
+
+        # 이 잡의 완료 신호
+        done_evt = threading.Event()
+
         try:
-            # mark inflight
+            # inflight 등록 (+ 완료 신호 보관)
             with lock:
                 inflight[req_id] = {
                     "user_id": job["user_id"],
-                    "payload": job, 
+                    "payload": job,
                     "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
                     "enqueued_at": job.get("_enqueued_at", now_utc().isoformat()),
+                    "done_evt": done_evt,
                 }
-            # call generator
+
+            # 제너레이터 호출
             with httpx.Client(timeout=10) as cli:
-                # 브릿지가 생성 서버에 넘겨줄 본문(필요한 만큼만 전달)
                 gen_body = {
                     "request_id": req_id,
                     "user_id": job["user_id"],
@@ -270,19 +275,40 @@ def worker_loop():
                     "reddit": job.get("reddit"),
                     "user": job.get("user"),
                 }
+                if not GENERATOR_ENDPOINT:
+                    raise RuntimeError("GENERATOR_ENDPOINT is not set")
                 cli.post(GENERATOR_ENDPOINT, json=gen_body)
+
+            # ★ 여기서 콜백을 기다림 → 완료 후에만 다음 잡으로 이동
+            if SERIALIZE_BY_CALLBACK:
+                ok = done_evt.wait(timeout=TTL_SECONDS)
+                if not ok:
+                    # 타임아웃 → 만료 처리
+                    with lock:
+                        info = inflight.pop(req_id, None)
+                    if info:
+                        event = {
+                            "event_id": f"evt_{req_id}_expired",
+                            "request_id": req_id,
+                            "user_id": info["user_id"],
+                            "status": "EXPIRED",
+                            "message": "callback timeout",
+                            "ts": now_utc().isoformat(),
+                            "schema_version": 1
+                        }
+                        produce_kafka(event["event_id"], event)
+
         except Exception as e:
-            # backoff & requeue
+            # 제너레이터 호출 실패 → 백오프 재큐잉 (이때 inflight 등록해뒀다면 제거)
             attempts += 1
+            with lock:
+                inflight.pop(req_id, None)
             if attempts <= 5:
                 sleep_s = min(2 ** attempts, 30) + (hash(req_id) % 1000)/1000.0
                 time.sleep(sleep_s)
                 job["_attempts"] = attempts
                 job_queue.put(job)
             else:
-                # 실패로 종결 -> Kafka에 FAILED 발행(브릿지 수준)
-                with lock:
-                    inflight.pop(req_id, None)
                 event = {
                     "event_id": f"evt_{req_id}_bridge_fail",
                     "request_id": req_id,
@@ -293,9 +319,9 @@ def worker_loop():
                     "schema_version": 1
                 }
                 produce_kafka(event["event_id"], event)
-                producer.flush(5)
         finally:
             job_queue.task_done()
+
 
 def expiry_sweeper():
     while True:
@@ -381,11 +407,18 @@ async def generator_callback(request: Request):
         raise HTTPException(400, f"invalid callback: {e}")
 
     with lock:
-        info = inflight.pop(cb.request_id, None)
+        info = inflight.get(cb.request_id)
+        done_evt = info.get("done_evt") if info else None
 
     # 늦은 콜백(만료 후 도착): Kafka 발행 안 함
     if info is None:
         return JSONResponse({"ok": True, "late": True})
+
+    if done_evt:
+        done_evt.set()
+
+    with lock:
+        inflight.pop(cb.request_id, None)
 
     # 정상 콜백 → Kafka 발행(원요청 user_id 결합)
     event = {

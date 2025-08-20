@@ -15,7 +15,14 @@ class PromptRequest(BaseModel):
     timelapse_hint: bool = True
     negative_override: Optional[str] = None
 
-class PromptResponse(BaseModel):
+# 1) 프롬프트 생성/재전송 응답 (prompts/negative)
+class PromptCreateResponse(BaseModel):
+    request_id: str
+    prompts: List[str]
+    negative: str
+
+# 2) 워크플로 실행 응답 (prompt_ids/history_urls)
+class PromptGenerateResponse(BaseModel):
     request_id: str
     prompt_ids: List[str]
     history_urls: List[str]
