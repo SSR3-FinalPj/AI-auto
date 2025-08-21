@@ -36,6 +36,7 @@ services:
       - NEG_TEXT_ID=7
       # 프롬프트 메모리 TTL(초)
       - PROMPT_TTL_SEC=86400
+      - BRIDGE_CALLBACK=http://bridge:9000/api/video/callback
     # Windows 경로 예시 (Docker Desktop에서 D: 드라이브 공유 허용 필요)
     volumes:
       - "D:/ComfyUI/workflows/testapi1.json:/app/workflows/testapi1.json:ro"
