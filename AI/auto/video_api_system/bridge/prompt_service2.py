@@ -3,19 +3,24 @@ import uuid
 import json
 import random
 import logging
-from typing import List
-from fastapi import FastAPI, HTTPException
+from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Request, Body  # ★ Request, Body 추가
 import requests
 from prompts_resend_router import router as prompts_resend_router
 from prompt_store import save_prompt_record
 
-
 # app.py와 스키마(계약) 일치: 중복 정의 제거
-from schemas import PromptRequest, PromptCreateResponse, PromptGenerateResponse
+from schemas import (
+    PromptRequest,
+    PromptCreateResponse,
+    PromptGenerateResponse,
+    build_base_prompt_en,   # ★ 추가: 브리지 페이로드 → base_prompt_en 생성
+)
 
 # ===== 설정 =====
 COMFYUI_BASE = os.getenv("COMFYUI_BASE", "http://127.0.0.1:8188")
 COMFYUI_API_URL = f"{COMFYUI_BASE}/prompt"
+BRIDGE_CALLBACK = os.getenv("BRIDGE_CALLBACK", "http://bridge:9000/api/video/callback")  # ★ 콜백 URL
 
 # 환경변수 없으면 기본 경로(필요 시 환경변수로 덮어쓰기)
 WORKFLOW_PATH = os.getenv("WORKFLOW_PATH", r"D:\ComfyUI\workflows\testapi1.json")
@@ -33,9 +38,8 @@ app.include_router(prompts_resend_router)
 # ===== 기본 타임랩스 단계 =====
 DEFAULT_STAGES = ["morning", "afternoon", "golden hour", "twilight (light rain)", "rainy night"]
 
-# ===== 실행 응답 모델(로컬 정의: 브리지(app.py)는 사용하지 않음) =====
+# ===== 로컬 응답 모델(미사용 가능) =====
 from pydantic import BaseModel
-
 class GenerateResponse(BaseModel):
     request_id: str
     prompt_ids: List[str]
@@ -62,11 +66,8 @@ def build_prompt_line(base_en: str, stage: str, same_angle: bool, consistent: bo
 
 def _submit_to_comfyui(positive: str, negative: str) -> str:
     wf = json.loads(json.dumps(_load_workflow()))  # deep copy
-
-    # 시드 주입
     if KSAMPLER_ID in wf and "inputs" in wf[KSAMPLER_ID]:
         wf[KSAMPLER_ID]["inputs"]["seed"] = random.randint(1, int(1e18))
-    # 텍스트 주입
     if POS_TEXT_ID in wf and "inputs" in wf[POS_TEXT_ID]:
         wf[POS_TEXT_ID]["inputs"]["text"] = positive
     if NEG_TEXT_ID in wf and "inputs" in wf[NEG_TEXT_ID]:
@@ -74,11 +75,10 @@ def _submit_to_comfyui(positive: str, negative: str) -> str:
 
     client_id = str(uuid.uuid4())
     payload = {"prompt": wf, "client_id": client_id}
-
     logging.info(f"[SUBMIT] client_id={client_id}, pos_len={len(positive)}, neg_len={len(negative)}")
 
     try:
-        r = requests.post(COMFYUI_API_URL, json=payload, timeout=(5, 120))  # (connect, read) 타임아웃
+        r = requests.post(COMFYUI_API_URL, json=payload, timeout=(5, 120))
         logging.info(f"[COMFYUI] status={r.status_code}")
         logging.info(f"[COMFYUI] body={r.text[:400]}")
         r.raise_for_status()
@@ -98,14 +98,24 @@ def _submit_to_comfyui(positive: str, negative: str) -> str:
         raise HTTPException(status_code=502, detail="ComfyUI response missing prompt_id")
     return pid
 
+def _pick(d: dict, keys) -> Optional[str]:
+    for k in keys:
+        if k in d and d[k] is not None:
+            return d[k]
+    return None
+
+def _pick_request_id(payload: dict) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    rid = _pick(payload, ["request_id", "requestId"])
+    if rid:
+        return rid
+    meta = payload.get("meta") or {}
+    return _pick(meta, ["request_id", "requestId"])
+
 # ===== 엔드포인트 =====
 @app.post("/api/prompts", response_model=PromptCreateResponse)
 def create_prompts(req: PromptRequest):
-    """
-    브리지(app.py)가 호출하는 계약(Contract) 엔드포인트.
-    - 입력: PromptRequest(base_prompt_en 필수, 나머지 옵션 기본값 사용 가능)
-    - 출력: PromptResponse(request_id, prompts[], negative)
-    """
     stages = req.stages or DEFAULT_STAGES
     prompts = [
         build_prompt_line(req.base_prompt_en, stage, req.same_camera_angle, req.consistent_framing, req.timelapse_hint)
@@ -114,37 +124,74 @@ def create_prompts(req: PromptRequest):
     negative = req.negative_override or "low quality, blurry, distorted, bad lighting, watermark, poorly drawn"
     request_id = str(uuid.uuid4())
     save_prompt_record(request_id, prompts, negative)
-
-    return PromptCreateResponse(
-        request_id=request_id,
-        prompts=prompts,
-        negative=negative
-    )
+    return PromptCreateResponse(request_id=request_id, prompts=prompts, negative=negative)
 
 @app.post("/api/prompts/generate", response_model=PromptGenerateResponse)
-def generate_and_run(req: PromptRequest):
+async def generate_and_run(payload: dict = Body(...)):
     """
-    (선택) 프롬프트 생성 + ComfyUI 실행까지 처리.
-    브리지(app.py)는 이 엔드포인트를 사용하지 않지만,
-    단독 테스트/자동화를 위해 제공.
+    브리지/직접 호출 모두 허용:
+    - payload에 base_prompt_en이 있으면 그대로 사용
+    - 없으면 build_base_prompt_en(payload)로 생성
+    - 브리지에서 보낸 request_id가 있으면 그대로 사용(콜백/응답 공통)
     """
-    stages = req.stages or DEFAULT_STAGES
+    # 0) request_id 결정
+    request_id = _pick_request_id(payload) or str(uuid.uuid4())
+    logging.info(f"[GENERATE] using request_id={request_id}")
+
+    # 1) base_prompt_en 확보
+    base_en = payload.get("base_prompt_en")
+    if not base_en:
+        try:
+            base_en = build_base_prompt_en(payload)  # weather/youtube/reddit/user → 한 줄 영어 프롬프트
+        except Exception as e:
+            logging.exception("[BASE_PROMPT] build failed")
+            raise HTTPException(400, f"missing base_prompt_en and failed to derive: {e}")
+
+    # 2) 플래그/스테이지 결정
+    stages = payload.get("stages") or DEFAULT_STAGES
+    same_angle = payload.get("same_camera_angle", True)
+    consistent = payload.get("consistent_framing", True)
+    timelapse_hint = payload.get("timelapse_hint", True)
+    negative = payload.get("negative_override") or "low quality, blurry, distorted, bad lighting, watermark, poorly drawn"
+
+    # (선택) 재전송 저장
     prompts = [
-        build_prompt_line(req.base_prompt_en, stage, req.same_camera_angle, req.consistent_framing, req.timelapse_hint)
+        build_prompt_line(base_en, stage, same_angle, consistent, timelapse_hint)
         for stage in stages
     ]
-    negative = req.negative_override or "low quality, blurry, distorted, bad lighting, watermark, poorly drawn"
+    try:
+        save_prompt_record(request_id, prompts, negative)
+    except Exception as e:
+        logging.warning(f"[PROMPT_STORE] save skipped: {e}")
 
+    # 3) ComfyUI 실행
     prompt_ids: List[str] = []
     history_urls: List[str] = []
-
     for p in prompts:
         pid = _submit_to_comfyui(p, negative)
         prompt_ids.append(pid)
         history_urls.append(f"{COMFYUI_BASE}/history/{pid}")
 
+    # 4) 브리지 콜백 자동 발신
+    cb_payload = {
+        "request_id": request_id,
+        "event_id": f"evt_{prompt_ids[0] if prompt_ids else 'noid'}",
+        "prompt_id": (prompt_ids[0] if prompt_ids else None),
+        "video_id": (prompt_ids[0] if prompt_ids else None), # 일단은 prompt_id로 대체 나중에 None이나 진짜 video_id
+        "prompt": (prompts[0] if prompts else None),
+        "video_path": (history_urls[0] if history_urls else None),
+        "status": "SUCCESS",
+        "message": None
+    }
+    try:
+        logging.info(f"[CALLBACK] POST {BRIDGE_CALLBACK} json={json.dumps(cb_payload)[:300]}")
+        requests.post(BRIDGE_CALLBACK, json=cb_payload, timeout=5)
+    except Exception as e:
+        logging.exception(f"[CALLBACK] failed: {e}")
+
+    # 5) 응답
     return PromptGenerateResponse(
-        request_id=str(uuid.uuid4()),
+        request_id=request_id,
         prompt_ids=prompt_ids,
         history_urls=history_urls
     )

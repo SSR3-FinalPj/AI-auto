@@ -36,6 +36,7 @@ services:
       - NEG_TEXT_ID=7
       # 프롬프트 메모리 TTL(초)
       - PROMPT_TTL_SEC=86400
+      - BRIDGE_CALLBACK=http://bridge:9000/api/video/callback
     # Windows 경로 예시 (Docker Desktop에서 D: 드라이브 공유 허용 필요)
     volumes:
       - "D:/ComfyUI/workflows/testapi1.json:/app/workflows/testapi1.json:ro"
@@ -60,13 +61,13 @@ services:
         condition: service_started
     environment:
       # 브리지가 '생성기'로 호출하는 엔드포인트(프롬프트 서버의 실행 API)
-      - GENERATOR_ENDPOINT=http://prompt:8001/api/prompts/generate
+      - GENERATOR_ENDPOINT=${GENERATOR_ENDPOINT}
       # Kafka 접속 정보
-      - KAFKA_BOOTSTRAP=kafka:9092
-      - KAFKA_TOPIC=video-callback
+      - KAFKA_BOOTSTRAP=${KAFKA_BOOTSTRAP}
+      - KAFKA_TOPIC=${KAFKA_TOPIC}
       # 큐 동작 파라미터
-      - TTL_SECONDS=86400
-      - WORKER_CONCURRENCY=1
+      - TTL_SECONDS=${TTL_SECONDS}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY}
       # 콜백 서명 검증을 쓸 경우(선택) 생성기와 공유
       # - CALLBACK_SECRET=changeme
     command: uvicorn app:app --host 0.0.0.0 --port 9000 --reload
