@@ -177,7 +177,7 @@ async def generate_and_run(payload: dict = Body(...)):
         "request_id": request_id,
         "event_id": f"evt_{prompt_ids[0] if prompt_ids else 'noid'}",
         "prompt_id": (prompt_ids[0] if prompt_ids else None),
-        "video_id": None,
+        "video_id": (prompt_ids[0] if prompt_ids else None), # 일단은 prompt_id로 대체 나중에 None이나 진짜 video_id
         "prompt": (prompts[0] if prompts else None),
         "video_path": (history_urls[0] if history_urls else None),
         "status": "SUCCESS",
