@@ -146,6 +146,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
+from llm_client import summarize_to_english
+from dotenv import load_dotenv
+load_dotenv()
 
 # -------------------
 # Settings
@@ -265,6 +268,18 @@ def worker_loop():
                     "done_evt": done_evt,
                 }
 
+            try:
+                english_text = summarize_to_english(job)
+            except Exception:
+                # 실패 시 폴백(서비스 연속성)
+                w = job.get("weather", {})
+                english_text = (
+                    f"{w.get('areaName','Unknown area')}: "
+                    f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
+                    f"UV {w.get('uvIndex','?')}."
+                )
+            print(f"[Gemini Prompt Generated] {english_text}")
+
             # 제너레이터 호출
             with httpx.Client(timeout=10) as cli:
                 gen_body = {
@@ -274,6 +289,8 @@ def worker_loop():
                     "youtube": job.get("youtube"),
                     "reddit": job.get("reddit"),
                     "user": job.get("user"),
+                    # ★ 새 필드: Gemini 요약문
+                    "english_text": english_text,
                 }
                 if not GENERATOR_ENDPOINT:
                     raise RuntimeError("GENERATOR_ENDPOINT is not set")
