@@ -207,6 +207,7 @@ class Weather(BaseModel):
     seventyRate: str
 
 class BridgeIn(BaseModel):
+    img: str
     user_id: str
     weather: Weather
     youtube: Optional[Dict[str, Any]] = None
@@ -321,6 +322,7 @@ def worker_loop():
                     "youtube": job.get("youtube"),
                     "reddit": job.get("reddit"),
                     "user": job.get("user"),
+                    "img": job.get("img"),
                     # ★ 새 필드: Gemini 요약문
                     "english_text": english_text,
                 }
