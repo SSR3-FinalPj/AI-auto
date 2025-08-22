@@ -146,6 +146,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
+from llm_client import summarize_to_english
+from dotenv import load_dotenv
+load_dotenv()
 
 # -------------------
 # Settings
@@ -216,10 +219,18 @@ idemp_index: Dict[str, str] = {}
 # completed to short-circuit duplicates
 completed: set[str] = set()
 
+printed: set[str] = set()
+
 lock = threading.Lock()
 
 def now_utc():
     return datetime.now(timezone.utc)
+
+def log_once(req_id: str, msg: str):
+    with lock:
+        if req_id not in printed:
+            print(msg)
+            printed.add(req_id)
 
 # -------------------
 # Helpers
@@ -265,6 +276,23 @@ def worker_loop():
                     "done_evt": done_evt,
                 }
 
+            try:
+                english_text = summarize_to_english(job)
+                english_text = job.get("_english_text")
+                if not english_text:
+                    english_text = summarize_to_english(job)
+                    job["_english_text"] = english_text
+                log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
+            except Exception:
+                # 실패 시 폴백(서비스 연속성)
+                w = job.get("weather", {})
+                english_text = job.get("_english_text") or (
+                    f"{w.get('areaName','Unknown area')}: "
+                    f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
+                    f"UV {w.get('uvIndex','?')}."
+                )
+                log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
+
             # 제너레이터 호출
             with httpx.Client(timeout=10) as cli:
                 gen_body = {
@@ -274,10 +302,17 @@ def worker_loop():
                     "youtube": job.get("youtube"),
                     "reddit": job.get("reddit"),
                     "user": job.get("user"),
+                    # ★ 새 필드: Gemini 요약문
+                    "english_text": english_text,
                 }
                 if not GENERATOR_ENDPOINT:
                     raise RuntimeError("GENERATOR_ENDPOINT is not set")
-                cli.post(GENERATOR_ENDPOINT, json=gen_body)
+                try:
+                    r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
+                    r.raise_for_status()
+                except Exception as ge:
+                    print(f"[GEN_POST_FAIL][{req_id}] {ge}")  # 왜 재시도되는지 보이게
+                    raise
 
             # ★ 여기서 콜백을 기다림 → 완료 후에만 다음 잡으로 이동
             if SERIALIZE_BY_CALLBACK:
