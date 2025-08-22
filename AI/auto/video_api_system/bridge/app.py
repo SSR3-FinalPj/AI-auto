@@ -163,13 +163,13 @@ TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))       # 24h
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))  # 기본 1개(순차)
 SERIALIZE_BY_CALLBACK = True  # 완료 콜백을 기다린 뒤에만 다음 잡으로
 
+
 # 추가: S3 presign 관련 환경변수
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
 S3_PRESIGN = os.getenv("S3_PRESIGN", "true").lower() == "true"           # true면 (bucket,key)만 와도 Bridge가 presign 생성
 S3_PRESIGN_EXPIRES = int(os.getenv("S3_PRESIGN_EXPIRES", "3600"))        # 초(기본 1시간)
 
-
-# ★ 추가: S3 클라이언트 (v4 서명)
+# 추가: S3 클라이언트 (v4 서명)
 _s3 = boto3.client("s3", region_name=AWS_REGION, config=Config(signature_version="s3v4"))
 
 def make_public_url(bucket: str, key: str, region: str = AWS_REGION) -> str:
@@ -220,6 +220,9 @@ class CallbackIn(BaseModel):
     video_id: Optional[str] = None
     prompt: Optional[str] = None
     video_path: Optional[str] = None
+    video_s3_bucket: Optional[str] = None
+    video_s3_key: Optional[str] = None
+    video_url: Optional[str] = None   # presigned 또는 public
     status: str = Field(..., pattern="^(SUCCESS|FAILED)$")
     message: Optional[str] = None
 
@@ -235,10 +238,18 @@ idemp_index: Dict[str, str] = {}
 # completed to short-circuit duplicates
 completed: set[str] = set()
 
+printed: set[str] = set()
+
 lock = threading.Lock()
 
 def now_utc():
     return datetime.now(timezone.utc)
+
+def log_once(req_id: str, msg: str):
+    with lock:
+        if req_id not in printed:
+            print(msg)
+            printed.add(req_id)
 
 # -------------------
 # Helpers
@@ -286,15 +297,20 @@ def worker_loop():
 
             try:
                 english_text = summarize_to_english(job)
+                english_text = job.get("_english_text")
+                if not english_text:
+                    english_text = summarize_to_english(job)
+                    job["_english_text"] = english_text
+                log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
             except Exception:
                 # 실패 시 폴백(서비스 연속성)
                 w = job.get("weather", {})
-                english_text = (
+                english_text = job.get("_english_text") or (
                     f"{w.get('areaName','Unknown area')}: "
                     f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
                     f"UV {w.get('uvIndex','?')}."
                 )
-            print(f"[Gemini Prompt Generated] {english_text}")
+                log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
 
             # 제너레이터 호출
             with httpx.Client(timeout=10) as cli:
@@ -310,7 +326,12 @@ def worker_loop():
                 }
                 if not GENERATOR_ENDPOINT:
                     raise RuntimeError("GENERATOR_ENDPOINT is not set")
-                cli.post(GENERATOR_ENDPOINT, json=gen_body)
+                try:
+                    r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
+                    r.raise_for_status()
+                except Exception as ge:
+                    print(f"[GEN_POST_FAIL][{req_id}] {ge}")  # 왜 재시도되는지 보이게
+                    raise
 
             # ★ 여기서 콜백을 기다림 → 완료 후에만 다음 잡으로 이동
             if SERIALIZE_BY_CALLBACK:
@@ -453,7 +474,7 @@ async def generator_callback(request: Request):
     with lock:
         inflight.pop(cb.request_id, None)
         
-    # ★ 추가: URL 확정(effective_url). 우선순위: 콜백에 온 video_url → (bucket,key)로 presign or public URL
+    # 추가: URL 확정(effective_url). 우선순위: 콜백에 온 video_url → (bucket,key)로 presign or public URL
     effective_url = cb.video_url
     if not effective_url and cb.video_s3_bucket and cb.video_s3_key:
         if S3_PRESIGN:
@@ -473,6 +494,8 @@ async def generator_callback(request: Request):
         "prompt_id": cb.prompt_id,
         "video_id": cb.video_id,
         "prompt": cb.prompt,
+        "video_path": cb.video_path,
+        # 추가: S3/URL 필드 포함 (기존 video_path도 유지)
         "video_path": cb.video_path,
         "video_s3_bucket": cb.video_s3_bucket,
         "video_s3_key": cb.video_s3_key,
