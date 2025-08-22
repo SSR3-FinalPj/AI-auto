@@ -150,6 +150,9 @@ from llm_client import summarize_to_english
 from dotenv import load_dotenv
 load_dotenv()
 
+import boto3
+from botocore.config import Config
+
 # -------------------
 # Settings
 # -------------------
@@ -159,6 +162,19 @@ KAFKA_TOPIC      = os.getenv("KAFKA_TOPIC", "video-callback")
 TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))       # 24h
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))  # 기본 1개(순차)
 SERIALIZE_BY_CALLBACK = True  # 완료 콜백을 기다린 뒤에만 다음 잡으로
+
+# 추가: S3 presign 관련 환경변수
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+S3_PRESIGN = os.getenv("S3_PRESIGN", "true").lower() == "true"           # true면 (bucket,key)만 와도 Bridge가 presign 생성
+S3_PRESIGN_EXPIRES = int(os.getenv("S3_PRESIGN_EXPIRES", "3600"))        # 초(기본 1시간)
+
+
+# ★ 추가: S3 클라이언트 (v4 서명)
+_s3 = boto3.client("s3", region_name=AWS_REGION, config=Config(signature_version="s3v4"))
+
+def make_public_url(bucket: str, key: str, region: str = AWS_REGION) -> str:
+    # S3 Virtual-hosted–style URL
+    return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
 
 # Kafka 안전 설정(idempotent producer)
 producer_conf = {
@@ -436,6 +452,18 @@ async def generator_callback(request: Request):
 
     with lock:
         inflight.pop(cb.request_id, None)
+        
+    # ★ 추가: URL 확정(effective_url). 우선순위: 콜백에 온 video_url → (bucket,key)로 presign or public URL
+    effective_url = cb.video_url
+    if not effective_url and cb.video_s3_bucket and cb.video_s3_key:
+        if S3_PRESIGN:
+            effective_url = _s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": cb.video_s3_bucket, "Key": cb.video_s3_key},
+                ExpiresIn=S3_PRESIGN_EXPIRES
+            )
+        else:
+            effective_url = make_public_url(cb.video_s3_bucket, cb.video_s3_key, AWS_REGION)
 
     # 정상 콜백 → Kafka 발행(원요청 user_id 결합)
     event = {
@@ -446,10 +474,13 @@ async def generator_callback(request: Request):
         "video_id": cb.video_id,
         "prompt": cb.prompt,
         "video_path": cb.video_path,
+        "video_s3_bucket": cb.video_s3_bucket,
+        "video_s3_key": cb.video_s3_key,
+        "video_url": effective_url,
         "status": cb.status,
         "message": cb.message,
         "ts": now_utc().isoformat(),
-        "schema_version": 1
+        "schema_version": 2
     }
     produce_kafka(cb.event_id, event)
     producer.flush(5)
