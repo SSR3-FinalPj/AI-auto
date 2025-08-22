@@ -1,109 +1,105 @@
-# # llm_client.py
-# import os, json, time
-# from typing import Any, Dict, Optional
-# import google.generativeai as genai
-# from dotenv import load_dotenv
-# load_dotenv()
-
-# # 환경변수:
-# #   GOOGLE_API_KEY  (필수)
-# #   GEMINI_MODEL    (선택, 기본: gemini-1.5-flash)
-# #   GEMINI_RETRIES  (선택, 기본: 2)
-
-# _API_KEY = os.getenv("GOOGLE_API_KEY")
-# if not _API_KEY:
-#     raise RuntimeError("GOOGLE_API_KEY is not set")
-# _MODEL  = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-# _RETRY  = int(os.getenv("GEMINI_RETRIES", "2"))
-
-# genai.configure(api_key=_API_KEY)
-# _model = genai.GenerativeModel(_MODEL)
-
-# _SYSTEM = (
-#     "You are a concise data-to-text generator. "
-#     "Given JSON with weather/crowd (and optionally youtube/reddit), "
-#     "return 2–4 compact English sentences (<70 words) summarizing: "
-#     "location + weather(temp/humidity/UV), crowd level (gender/ages if present), "
-#     "and one short suggestion. No emojis/hashtags."
-# )
-
-# def _build_user_prompt(payload: Dict[str, Any]) -> str:
-#     weather = payload.get("weather") or {}
-#     youtube = payload.get("youtube")
-#     reddit  = payload.get("reddit")
-#     return "JSON:\n" + json.dumps(
-#         {"weather": weather, "youtube": youtube, "reddit": reddit},
-#         ensure_ascii=False
-#     )
-
-# def summarize_to_english(payload: Dict[str, Any]) -> str:
-#     last_err: Optional[Exception] = None
-#     for attempt in range(_RETRY + 1):
-#         try:
-#             resp = _model.generate_content(
-#                 contents=[
-#                     {"role": "system", "parts": [_SYSTEM]},
-#                     {"role": "user",   "parts": [_build_user_prompt(payload)]},
-#                 ]
-#             )
-#             text = (resp.text or "").strip()
-#             if not text:
-#                 raise RuntimeError("Empty response from Gemini")
-#             return " ".join(text.split())  # 과도한 개행 정리
-#         except Exception as e:
-#             last_err = e
-#             if attempt < _RETRY:
-#                 time.sleep(0.6 * (attempt + 1))
-#             else:
-#                 raise RuntimeError(f"Gemini summarization failed: {e}") from e
-
-# llm_client.py  (REST version; gRPC/SDK 우회)
+# llm_client.py  — REST 버전 + lazy key + 소셜/유저 반영 + 안정 프롬프트
 import os, json, time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import httpx
 from dotenv import load_dotenv
+
 load_dotenv()
 
-API_KEY = (os.getenv("GOOGLE_API_KEY", "").strip().strip('"').strip("'"))
-if not API_KEY:
-    raise RuntimeError("GOOGLE_API_KEY is not set")
+SYSTEM = ('''
+You convert JSON into natural English sentences.
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+Weather & Crowd (always present):
+- Write 3 sentences.
+1) Location + temperature (°C), humidity (%), UV index + a short feels-like description.
+2) Crowd level including male/female ratios and dominant age groups if available.
+3) One actionable suggestion (hydration, sun protection, walking time, etc.).
+Each sentence should be 15–25 words. No lists, emojis, or hashtags.
 
-SYSTEM = (
-  "You convert JSON about local weather and crowd into exactly 3 natural English sentences. "
-  "1) Location + temp(°C), humidity(%), UV(number) + a short feels-like descriptor. "
-  "2) Crowd level including male/female ratios and any dominant age groups if present. "
-  "3) One actionable suggestion (hydration, sun protection, walking time, etc.). "
-  "12–25 words per sentence. No lists, emojis, or hashtags."
-)
+YouTube, Reddit, and User (only if data exists):
+- Write up to 4 additional sentences (one per item).
+1) YouTube: include video_id, view_count, like_count, comment_count, and a brief engagement trend with a feels-like description.
+2) Reddit: include video_id, score, upvotes_estimated, downvotes_estimated, num_comments, and the general tone of comments.
+3) User: reflect user notes or preferences as the highest priority in wording.
+4) Provide one actionable suggestion to improve engagement (e.g., encourage likes, comments, or views).
+Each sentence should be 15–25 words. No lists, emojis, or hashtags.
+''').strip()
+
+def _get_api_key() -> str:
+    # import 시점이 아닌 호출 시점에 키를 읽어 예외를 뒤로 미룹니다.
+    key = (os.getenv("GOOGLE_API_KEY") or "").strip().strip('"').strip("'")
+    if not key:
+        raise RuntimeError("GOOGLE_API_KEY is not set")
+    # 제어문자 제거 방지
+    if any(ord(c) < 32 for c in key):
+        raise RuntimeError("GOOGLE_API_KEY contains control characters")
+    return key
+
+def _model_name() -> str:
+    return os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+def _normalize_social(payload: Dict[str, Any]) -> Dict[str, Any]:
+    y = ((payload.get("youtube") or {}).get("additionalProp1") or {}).copy()
+    r = ((payload.get("reddit")  or {}).get("additionalProp1") or {}).copy()
+    u = ((payload.get("user")    or {}).get("additionalProp1") or {}).copy()
+
+    # YouTube 키 표준화
+    y["video_id"]      = y.get("video_id")
+    y["view_count"]    = y.get("view_count") or y.get("views")
+    y["like_count"]    = y.get("like_count") or y.get("likes") or y.get("like")
+    y["comment_count"] = y.get("comment_count") or y.get("comments_count") or y.get("comment")
+    if isinstance(y.get("comments"), str):
+        y["sample_comment"] = y["comments"]
+
+    # Reddit 키 표준화
+    r["video_id"]             = r.get("video_id")
+    r["score"]                = r.get("score")
+    r["upvotes_estimated"]    = r.get("upvotes_estimated") or r.get("upvotes")
+    r["downvotes_estimated"]  = r.get("downvotes_estimated") or r.get("downvotes")
+    r["num_comments"]         = r.get("num_comments") or r.get("numcomment")
+    if isinstance(r.get("comments"), str):
+        r["sample_comment"] = r["comments"]
+
+    # User 노트
+    user_notes = u.get("notes") or u.get("note")
+
+    return {"youtube": y or None, "reddit": r or None, "user_notes": user_notes}
 
 def _build_user_prompt(payload: Dict[str, Any]) -> str:
-    weather = payload.get("weather") or {}
-    youtube = payload.get("youtube")
-    reddit  = payload.get("reddit")
-    # 숫자 반응이 있으면 온라인 활동감 요약 힌트 제공(선택)
+    w = payload.get("weather") or {}
+    social = _normalize_social(payload)
+
+    # 참여도 힌트(있으면)
     hint = ""
     try:
-        y = (youtube or {}).get("additionalProp1") or {}
-        r = (reddit  or {}).get("additionalProp1") or {}
-        likes = int(str(y.get("like","0")).strip() or 0)
-        comments = int(str(y.get("comment","0")).strip() or 0)
-        score = int(str(r.get("score","0")).strip() or 0)
-        numc  = int(str(r.get("numcomment","0")).strip() or 0)
-        if (likes+comments+score+numc) > 0:
-            hint = f"\nEngagement hint: likes={likes}, comments={comments}, reddit_score={score}, reddit_comments={numc}."
+        likes = int(str((social["youtube"] or {}).get("like_count",    "0")))
+        cmt   = int(str((social["youtube"] or {}).get("comment_count", "0")))
+        views = int(str((social["youtube"] or {}).get("view_count",    "0")))
+        score = int(str((social["reddit"]  or {}).get("score",         "0")))
+        rcmts = int(str((social["reddit"]  or {}).get("num_comments",  "0")))
+        if (likes + cmt + views + score + rcmts) > 0:
+            hint = f"\nEngagement hint: yt_views={views}, yt_likes={likes}, yt_comments={cmt}, reddit_score={score}, reddit_comments={rcmts}."
     except Exception:
         pass
 
-    return ("JSON follows. Write the 3 sentences as requested."
-            f"{hint}\nJSON:\n" + json.dumps(
-               {"weather": weather, "youtube": youtube, "reddit": reddit},
-               ensure_ascii=False
-            ))
+    json_payload = {
+        "weather": w,
+        "youtube": social["youtube"],
+        "reddit":  social["reddit"],
+        "user":    {"notes": social["user_notes"]} if social["user_notes"] else None
+    }
+
+    # SYSTEM에 이미 전체 지시가 있으므로 여기서는 “3문장만” 같은 제약을 다시 쓰지 않습니다.
+    return (
+        "JSON is provided. Follow the SYSTEM instructions above for weather/crowd and for social if present."
+        f"{hint}\nJSON:\n" + json.dumps(json_payload, ensure_ascii=False)
+    )
 
 def summarize_to_english(payload: Dict[str, Any]) -> str:
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={API_KEY}"
+    api_key = _get_api_key()
+    model   = _model_name()
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
     req = {
         "contents": [
             {"role": "user", "parts": [{"text": SYSTEM}]},
@@ -111,6 +107,7 @@ def summarize_to_english(payload: Dict[str, Any]) -> str:
         ]
     }
 
+    last_err: Optional[Exception] = None
     for i in range(3):
         try:
             with httpx.Client(timeout=20) as cli:
@@ -118,12 +115,14 @@ def summarize_to_english(payload: Dict[str, Any]) -> str:
             resp.raise_for_status()
             data = resp.json()
             parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
-            text = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
-            text = " ".join(text.split()).strip()
+            text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
+            text  = " ".join(text.split()).strip()
             if not text:
                 raise RuntimeError("Empty response from Gemini REST")
             return text
         except Exception as e:
-            if i == 2:
+            last_err = e
+            if i < 2:
+                time.sleep(0.6*(i+1))
+            else:
                 raise RuntimeError(f"Gemini REST failed: {e}") from e
-            time.sleep(0.6*(i+1))
