@@ -163,16 +163,6 @@ TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))       # 24h
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))  # 기본 1개(순차)
 SERIALIZE_BY_CALLBACK = True  # 완료 콜백을 기다린 뒤에만 다음 잡으로
 
-
-# 추가: S3 presign 관련 환경변수
-AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
-S3_PRESIGN = os.getenv("S3_PRESIGN", "true").lower() == "true"           # true면 (bucket,key)만 와도 Bridge가 presign 생성
-S3_PRESIGN_EXPIRES = int(os.getenv("S3_PRESIGN_EXPIRES", "3600"))        # 초(기본 1시간)
-
-def make_public_url(bucket: str, key: str, region: str = AWS_REGION) -> str:
-    # S3 Virtual-hosted–style URL
-    return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-
 # Kafka 안전 설정(idempotent producer)
 producer_conf = {
     "bootstrap.servers": KAFKA_BOOTSTRAP,
@@ -198,7 +188,7 @@ class Weather(BaseModel):
     teenRate: str
     twentyRate: str
     thirtyRate: str
-    fourtyRate: str
+    fortyRate: str
     fiftyRate: str
     sixtyRate: str
     seventyRate: str
