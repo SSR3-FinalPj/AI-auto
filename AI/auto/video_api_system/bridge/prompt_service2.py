@@ -22,6 +22,11 @@ COMFYUI_BASE = os.getenv("COMFYUI_BASE", "http://127.0.0.1:8188")
 COMFYUI_API_URL = f"{COMFYUI_BASE}/prompt"
 BRIDGE_CALLBACK = os.getenv("BRIDGE_CALLBACK", "http://bridge:9000/api/video/callback")  # ★ 콜백 URL
 
+# 추가(선택): S3 기본값
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+S3_BUCKET  = os.getenv("S3_BUCKET")                      # 기본 버킷(없으면 payload에서 받기)
+S3_PREFIX  = os.getenv("S3_PREFIX", "comfyui/outputs")   # 키 프리픽스 규칙
+
 # 환경변수 없으면 기본 경로(필요 시 환경변수로 덮어쓰기)
 WORKFLOW_PATH = os.getenv("WORKFLOW_PATH", r"D:\ComfyUI\workflows\testapi1.json")
 
@@ -173,6 +178,13 @@ async def generate_and_run(payload: dict = Body(...)):
         history_urls.append(f"{COMFYUI_BASE}/history/{pid}")
 
     # 4) 브리지 콜백 자동 발신
+    
+    s3_bucket = payload.get("s3_bucket") or S3_BUCKET
+    s3_key    = payload.get("s3_key")
+    if not s3_key and prompt_ids:
+        s3_key = f"{S3_PREFIX.rstrip('/')}/{request_id}/{prompt_ids[0]}.mp4"
+    video_url = payload.get("video_url")
+    
     cb_payload = {
         "request_id": request_id,
         "event_id": f"evt_{prompt_ids[0] if prompt_ids else 'noid'}",
@@ -180,6 +192,9 @@ async def generate_and_run(payload: dict = Body(...)):
         "video_id": (prompt_ids[0] if prompt_ids else None), # 일단은 prompt_id로 대체 나중에 None이나 진짜 video_id
         "prompt": (prompts[0] if prompts else None),
         "video_path": (history_urls[0] if history_urls else None),
+        "video_s3_bucket": s3_bucket,
+        "video_s3_key": s3_key,
+        "video_url": video_url,
         "status": "SUCCESS",
         "message": None
     }
