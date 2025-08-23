@@ -142,16 +142,13 @@ from typing import Optional, Any, Dict
 
 import httpx
 from fastapi import FastAPI, Body, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
-from llm_client import summarize_to_english
+from llm_client import summarize_to_english, summarize_top3_text
 from dotenv import load_dotenv
 load_dotenv()
-
-# import boto3
-# from botocore.config import Config
 
 # -------------------
 # Settings
@@ -164,7 +161,7 @@ WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))  # 기본 1개(�
 SERIALIZE_BY_CALLBACK = True  # 완료 콜백을 기다린 뒤에만 다음 잡으로
 
 print("GENERATOR_ENDPOINT =", GENERATOR_ENDPOINT)
-
+KST = timezone(timedelta(hours=9))
 
 # Kafka 안전 설정(idempotent producer)
 producer_conf = {
@@ -199,6 +196,7 @@ class Weather(BaseModel):
 class BridgeIn(BaseModel):
     img: str
     user_id: str
+    shutdown: bool = False
     weather: Weather
     youtube: Optional[Dict[str, Any]] = None
     reddit: Optional[Dict[str, Any]] = None
@@ -216,6 +214,11 @@ class CallbackIn(BaseModel):
     video_url: Optional[str] = None   # presigned 또는 public
     status: str = Field(..., pattern="^(SUCCESS|FAILED)$")
     message: Optional[str] = None
+
+class Envelope(BaseModel):
+    youtube: Optional[Dict[str, Any]] = None   # {"comments": [ ... ]}  // list
+    reddit: Optional[Dict[str, Any]]  = None   # {"comments": { ... }}  // map
+    topic: Optional[str] = None 
 
 # -------------------
 # State
@@ -242,6 +245,13 @@ def log_once(req_id: str, msg: str):
             print(msg)
             printed.add(req_id)
 
+def _to_iso_kst_from_unix(ts: Optional[float]) -> Optional[str]:
+    if ts is None: return None
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(KST).isoformat()
+    except Exception:
+        return None
+
 # -------------------
 # Helpers
 # -------------------
@@ -262,6 +272,17 @@ def hmac_ok(raw_body: bytes, signature: str, secret: str) -> bool:
 def produce_kafka(event_key: str, value: dict):
     producer.produce(topic=KAFKA_TOPIC, key=event_key, value=json.dumps(value, ensure_ascii=False).encode("utf-8"))
     producer.flush(5)
+
+def _input_shape_hint(obj: Any) -> str:
+    if isinstance(obj, dict):
+        sample = next(iter(obj.values()), {})
+        if isinstance(sample, dict) and {"id","body","score"}.issubset(sample.keys()):
+            return "reddit_map"
+    if isinstance(obj, list):
+        sample = obj[0] if obj else {}
+        if isinstance(sample, dict) and {"comment_id","comment"}.issubset(sample.keys()):
+            return "youtube_list"
+    return "unknown"
 
 # -------------------
 # Worker
@@ -311,6 +332,7 @@ def worker_loop():
                     "request_id": req_id,
                     "user_id": job["user_id"],
                     "img": job.get("img"),
+                    "shutdown":job.get("shutdown"),
                     # ★ 새 필드: Gemini 요약문
                     "english_text": english_text,
                 }
@@ -496,3 +518,10 @@ def stats():
 @app.get("/healthz")
 def health():
     return {"ok": True}
+
+@app.post("/api/comments", response_class=PlainTextResponse)
+def comments_top3(envelope: Envelope):
+    if not envelope.youtube and not envelope.reddit:
+        raise HTTPException(400, "youtube 또는 reddit 중 최소 하나는 포함해야 합니다.")
+    data = summarize_top3_text(envelope.model_dump())  # dict 반환
+    return JSONResponse(content=data, status_code=200)
