@@ -1,4 +1,4 @@
-# generator_server_v3_s3only.py
+# generator_server.py
 import os
 import json
 import uuid
@@ -22,31 +22,10 @@ POLL_TIMEOUT       = int(os.getenv("POLL_TIMEOUT", "36000"))  # 초
 class GenIn(BaseModel):
     request_id: str
     user_id: str
-    img: Optional[str] = None          # app.py에서 넘어오는 값 → 그대로 72.image에 매핑
-    english_text: Optional[str] = ""   # app.py에서 넘어오는 영어 프롬프트
+    img: Optional[str] = None          # app.py에서 넘어오는 값 → 72.image에 반영
+    english_text: Optional[str] = ""   # 영어 프롬프트
 
 # ---------- 유틸 ----------
-def _patch_workflow(workflow: Dict[str, Any],
-                    prompt_text: str,
-                    img_value: Optional[str]) -> Dict[str, Any]:
-    """
-    - 71(FramePackTimestampedTextEncode).inputs.text ← prompt_text
-    - 72(LoadImageS3).inputs.image ← img_value (브리지에서 받은 값 그대로)
-    """
-    wf = json.loads(json.dumps(workflow))  # deepcopy
-
-    # 71.text
-    if "71" in wf and isinstance(wf["71"], dict):
-        wf["71"].setdefault("inputs", {})
-        wf["71"]["inputs"]["text"] = prompt_text or ""
-
-    # 72.image
-    if img_value and "72" in wf and isinstance(wf["72"], dict):
-        wf["72"].setdefault("inputs", {})
-        wf["72"]["inputs"]["image"] = img_value
-
-    return wf
-
 async def _submit_to_comfy(patched_workflow: Dict[str, Any]) -> str:
     client_id = uuid.uuid4().hex
     payload = {"client_id": client_id, "prompt": patched_workflow}
@@ -60,9 +39,7 @@ async def _submit_to_comfy(patched_workflow: Dict[str, Any]) -> str:
     return pid
 
 async def _poll_history_for_mp4(prompt_id: str) -> Tuple[str, Optional[str]]:
-    """
-    /history/{prompt_id}에서 .mp4 파일명을 찾아 반환.
-    """
+    """ /history/{prompt_id}에서 .mp4 파일명을 찾아 반환 """
     deadline = asyncio.get_event_loop().time() + POLL_TIMEOUT
     async with httpx.AsyncClient(timeout=30) as cli:
         while True:
@@ -127,7 +104,7 @@ async def _callback_bridge_fail(request_id: str, msg: str) -> None:
             pass
 
 # ---------- FastAPI ----------
-app = FastAPI(title="Generator Server for ComfyUI (videotest3, direct S3 key)")
+app = FastAPI(title="Generator Server for ComfyUI (videotest3, JSON pre-modify)")
 
 @app.post("/generate")
 async def generate(payload: GenIn = Body(...)):
@@ -140,10 +117,18 @@ async def generate(payload: GenIn = Body(...)):
         await _callback_bridge_fail(payload.request_id, "img 누락")
         return JSONResponse({"ok": False, "error": "img missing"}, status_code=400)
 
-    # 워크플로 로드/패치
+    # === 워크플로 JSON 파일 자체를 먼저 수정 ===
     wf = json.loads(WORKFLOW_JSON_PATH.read_text(encoding="utf-8"))
-    patched = _patch_workflow(wf, payload.english_text or "", payload.img)
+    if "72" in wf and isinstance(wf["72"], dict):
+        wf["72"].setdefault("inputs", {})
+        wf["72"]["inputs"]["image"] = payload.img   # img 값 반영
+    # 파일 덮어쓰기
+    WORKFLOW_JSON_PATH.write_text(json.dumps(wf, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    # 수정된 JSON 다시 로드
+    patched = json.loads(WORKFLOW_JSON_PATH.read_text(encoding="utf-8"))
+
+    # === ComfyUI 실행 ===
     try:
         prompt_id = await _submit_to_comfy(patched)
     except Exception as e:
