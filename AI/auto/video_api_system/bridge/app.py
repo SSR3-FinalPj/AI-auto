@@ -163,6 +163,9 @@ TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))       # 24h
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))  # 기본 1개(순차)
 SERIALIZE_BY_CALLBACK = True  # 완료 콜백을 기다린 뒤에만 다음 잡으로
 
+print("GENERATOR_ENDPOINT =", GENERATOR_ENDPOINT)
+
+
 # Kafka 안전 설정(idempotent producer)
 producer_conf = {
     "bootstrap.servers": KAFKA_BOOTSTRAP,
@@ -264,8 +267,10 @@ def produce_kafka(event_key: str, value: dict):
 # Worker
 # -------------------
 def worker_loop():
+    print("Worker thread started!")
     while True:
         job = job_queue.get()
+        print(f"[Worker] Dequeued job {job['request_id']} for user {job['user_id']}")
         attempts = job.get("_attempts", 0)
         req_id = job["request_id"]
 
