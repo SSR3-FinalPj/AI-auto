@@ -150,9 +150,6 @@ from llm_client import summarize_to_english
 from dotenv import load_dotenv
 load_dotenv()
 
-# import boto3
-# from botocore.config import Config
-
 # -------------------
 # Settings
 # -------------------
@@ -160,13 +157,12 @@ GENERATOR_ENDPOINT = os.getenv("GENERATOR_ENDPOINT")
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP")
 KAFKA_TOPIC      = os.getenv("KAFKA_TOPIC", "video-callback")
 TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))       # 24h
-WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))  # 기본 1개(순차)
-SERIALIZE_BY_CALLBACK = True  # 완료 콜백을 기다린 뒤에만 다음 잡으로
+WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))
+SERIALIZE_BY_CALLBACK = True
 
 print("GENERATOR_ENDPOINT =", GENERATOR_ENDPOINT)
 
-
-# Kafka 안전 설정(idempotent producer)
+# Kafka 설정
 producer_conf = {
     "bootstrap.servers": KAFKA_BOOTSTRAP,
     "enable.idempotence": True,
@@ -213,24 +209,18 @@ class CallbackIn(BaseModel):
     video_path: Optional[str] = None
     video_s3_bucket: Optional[str] = None
     video_s3_key: Optional[str] = None
-    video_url: Optional[str] = None   # presigned 또는 public
+    video_url: Optional[str] = None
     status: str = Field(..., pattern="^(SUCCESS|FAILED)$")
     message: Optional[str] = None
 
 # -------------------
 # State
 # -------------------
-
 job_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
-# in-flight: request_id -> info
 inflight: Dict[str, Dict[str, Any]] = {}
-# idempotency index: key -> request_id
 idemp_index: Dict[str, str] = {}
-# completed to short-circuit duplicates
 completed: set[str] = set()
-
 printed: set[str] = set()
-
 lock = threading.Lock()
 
 def now_utc():
@@ -254,13 +244,12 @@ def body_hash(d: dict) -> str:
 
 def hmac_ok(raw_body: bytes, signature: str, secret: str) -> bool:
     mac = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    # signature can be plain hex or "sha256=..." style
     sig = signature.split("=", 1)[-1].strip() if "=" in signature else signature
-    # constant time compare
     return hmac.compare_digest(mac, sig)
 
 def produce_kafka(event_key: str, value: dict):
-    producer.produce(topic=KAFKA_TOPIC, key=event_key, value=json.dumps(value, ensure_ascii=False).encode("utf-8"))
+    producer.produce(topic=KAFKA_TOPIC, key=event_key,
+                     value=json.dumps(value, ensure_ascii=False).encode("utf-8"))
     producer.flush(5)
 
 # -------------------
@@ -274,11 +263,10 @@ def worker_loop():
         attempts = job.get("_attempts", 0)
         req_id = job["request_id"]
 
-        # 이 잡의 완료 신호
         done_evt = threading.Event()
 
         try:
-            # inflight 등록 (+ 완료 신호 보관)
+            # inflight 등록
             with lock:
                 inflight[req_id] = {
                     "user_id": job["user_id"],
@@ -289,20 +277,26 @@ def worker_loop():
                 }
 
             try:
-                english_text = summarize_to_english(job)
+                # 🔑 LLM 프롬프트 생성
                 english_text = job.get("_english_text")
                 if not english_text:
                     english_text = summarize_to_english(job)
                     job["_english_text"] = english_text
+                with lock:
+                    inflight[req_id]["english_text"] = english_text
                 log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
-            except Exception:
-                # 실패 시 폴백(서비스 연속성)
+
+            except Exception as e:
+                # 실패 시 fallback
                 w = job.get("weather", {})
-                english_text = job.get("_english_text") or (
+                english_text = (
                     f"{w.get('areaName','Unknown area')}: "
                     f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
                     f"UV {w.get('uvIndex','?')}."
                 )
+                job["_english_text"] = english_text
+                with lock:
+                    inflight[req_id]["english_text"] = english_text
                 log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
 
             # 제너레이터 호출
@@ -311,7 +305,6 @@ def worker_loop():
                     "request_id": req_id,
                     "user_id": job["user_id"],
                     "img": job.get("img"),
-                    # ★ 새 필드: Gemini 요약문
                     "english_text": english_text,
                 }
                 if not GENERATOR_ENDPOINT:
@@ -320,30 +313,16 @@ def worker_loop():
                     r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
                     r.raise_for_status()
                 except Exception as ge:
-                    print(f"[GEN_POST_FAIL][{req_id}] {ge}")  # 왜 재시도되는지 보이게
+                    print(f"[GEN_POST_FAIL][{req_id}] {ge}")
                     raise
 
-            # ★ 여기서 콜백을 기다림 → 완료 후에만 다음 잡으로 이동
+            # 콜백 대기
             if SERIALIZE_BY_CALLBACK:
                 ok = done_evt.wait(timeout=TTL_SECONDS)
                 if not ok:
-                    # 타임아웃 → 만료 처리
                     with lock:
-                        info = inflight.pop(req_id, None)
-                    if info:
-                        event = {
-                            "event_id": f"evt_{req_id}_expired",
-                            "request_id": req_id,
-                            "user_id": info["user_id"],
-                            "status": "EXPIRED",
-                            "message": "callback timeout",
-                            "ts": now_utc().isoformat(),
-                            "schema_version": 1
-                        }
-                        produce_kafka(event["event_id"], event)
-
+                        inflight.pop(req_id, None)
         except Exception as e:
-            # 제너레이터 호출 실패 → 백오프 재큐잉 (이때 inflight 등록해뒀다면 제거)
             attempts += 1
             with lock:
                 inflight.pop(req_id, None)
@@ -366,7 +345,6 @@ def worker_loop():
         finally:
             job_queue.task_done()
 
-
 def expiry_sweeper():
     while True:
         time.sleep(30)
@@ -384,6 +362,7 @@ def expiry_sweeper():
                 "event_id": f"evt_{r}_expired",
                 "request_id": r,
                 "user_id": info["user_id"],
+                "prompt": info.get("english_text"),   #  만료 시에도 프롬프트 포함
                 "status": "EXPIRED",
                 "message": "callback timeout",
                 "ts": now_utc().isoformat(),
@@ -394,17 +373,15 @@ def expiry_sweeper():
             producer.flush(5)
 
 # -------------------
-# Lifespan (startup/shutdown)
+# Lifespan
 # -------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
     print("앱 시작 준비 중...")
     for _ in range(WORKER_CONCURRENCY):
         threading.Thread(target=worker_loop, daemon=True).start()
     threading.Thread(target=expiry_sweeper, daemon=True).start()
     yield
-    # shutdown
     print("앱 종료 중... (Kafka flush)")
     try:
         producer.flush(5)
@@ -416,9 +393,6 @@ app = FastAPI(title="Bridge Server", lifespan=lifespan)
 # -------------------
 # Endpoints
 # -------------------
-from fastapi import APIRouter
-router = APIRouter()
-
 @app.post("/api/generate-video")
 def enqueue_generate_video(
     payload: BridgeIn,
@@ -429,8 +403,13 @@ def enqueue_generate_video(
     except ValidationError as e:
         raise HTTPException(400, str(e))
 
-    # dedup
-    derived_key = idem_key or body_hash({"user_id": data["user_id"], "weather": data["weather"], "youtube": data.get("youtube"), "reddit": data.get("reddit"), "user": data.get("user")})
+    derived_key = idem_key or body_hash({
+        "user_id": data["user_id"],
+        "weather": data["weather"],
+        "youtube": data.get("youtube"),
+        "reddit": data.get("reddit"),
+        "user": data.get("user")
+    })
     with lock:
         if derived_key in idemp_index:
             req_id = idemp_index[derived_key]
@@ -454,7 +433,6 @@ async def generator_callback(request: Request):
         info = inflight.get(cb.request_id)
         done_evt = info.get("done_evt") if info else None
 
-    # 늦은 콜백(만료 후 도착): Kafka 발행 안 함
     if info is None:
         return JSONResponse({"ok": True, "late": True})
 
@@ -464,13 +442,13 @@ async def generator_callback(request: Request):
     with lock:
         inflight.pop(cb.request_id, None)
 
-    # 정상 콜백 → Kafka 발행(원요청 user_id 결합)
+    #  prompt 없으면 inflight에 저장된 english_text 사용
     event = {
         "event_id": cb.event_id,
         "request_id": cb.request_id,
         "user_id": info["user_id"],
         "prompt_id": cb.prompt_id,
-        "prompt": cb.prompt,
+        "prompt": cb.prompt or info.get("english_text"),
         "video_path": cb.video_path,
         "status": cb.status,
         "message": cb.message,
