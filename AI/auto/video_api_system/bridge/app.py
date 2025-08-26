@@ -305,13 +305,14 @@ async def generator_callback(request: Request):
     with lock:
         inflight.pop(cb.get("requestId"), None)
 
-    # 🎯 원하는 스키마로 변환
     event = {
         "eventId": cb.get("eventId") or f"evt_{cb.get('requestId')}_bridge_fail",
-        "imageKey": cb.get("imageKey") or "images/2025/08/23/38ec51af-a428-4c8f-96ee-a786122f2075.jpg",
+        # imageKey: Generator 콜백이 없으면 Spring에서 들어온 원본 img 사용
+        "imageKey": cb.get("imageKey") or info["payload"].get("img"),
         "userId": int(cb.get("userId")),
-        "prompt": cb.get("prompt") or info.get("englishText") or "프롬포트 예문",
-        "videoKey": cb.get("videoKey") or "asjvijo2084y15f",
+        "prompt": cb.get("prompt") or info.get("englishText"),
+        # videoKey: 성공일 때만, 실패면 None
+        "videoKey": cb.get("videoKey") if cb.get("status") == "SUCCESS" else "testname1557.mp4",
         "status": cb.get("status") or "FAILED",
         "message": cb.get("message") or "bridge->generator call failed after retries: ",
         "createdAt": cb.get("createdAt") or now_utc().isoformat()
