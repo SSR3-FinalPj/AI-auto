@@ -4,11 +4,11 @@ from typing import Optional, Any, Dict
 
 import httpx
 from fastapi import FastAPI, Body, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
-from llm_client import summarize_to_english
+from llm_client import summarize_to_english, summarize_top3_text
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -18,11 +18,12 @@ load_dotenv()
 GENERATOR_ENDPOINT = os.getenv("GENERATOR_ENDPOINT")
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP")
 KAFKA_TOPIC      = os.getenv("KAFKA_TOPIC", "video-callback")
-TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))       # 24h
+TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))
 SERIALIZE_BY_CALLBACK = True
 
 print("GENERATOR_ENDPOINT =", GENERATOR_ENDPOINT)
+KST = timezone(timedelta(hours=9))
 
 # Kafka 설정
 producer_conf = {
@@ -57,6 +58,7 @@ class Weather(BaseModel):
 class BridgeIn(BaseModel):
     img: str
     user_id: str
+    shutdown: bool = False
     weather: Weather
     youtube: Optional[Dict[str, Any]] = None
     reddit: Optional[Dict[str, Any]] = None
@@ -74,6 +76,11 @@ class CallbackIn(BaseModel):
     video_url: Optional[str] = None
     status: str = Field(..., pattern="^(SUCCESS|FAILED)$")
     message: Optional[str] = None
+
+class Envelope(BaseModel):
+    youtube: Optional[Dict[str, Any]] = None
+    reddit: Optional[Dict[str, Any]]  = None
+    topic: Optional[str] = None 
 
 # -------------------
 # State
@@ -93,6 +100,13 @@ def log_once(req_id: str, msg: str):
         if req_id not in printed:
             print(msg)
             printed.add(req_id)
+
+def _to_iso_kst_from_unix(ts: Optional[float]) -> Optional[str]:
+    if ts is None: return None
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(KST).isoformat()
+    except Exception:
+        return None
 
 # -------------------
 # Helpers
@@ -126,9 +140,7 @@ def worker_loop():
         req_id = job["request_id"]
 
         done_evt = threading.Event()
-
         try:
-            # inflight 등록
             with lock:
                 inflight[req_id] = {
                     "user_id": job["user_id"],
@@ -139,7 +151,6 @@ def worker_loop():
                 }
 
             try:
-                # 🔑 LLM 프롬프트 생성
                 english_text = job.get("_english_text")
                 if not english_text:
                     english_text = summarize_to_english(job)
@@ -147,9 +158,7 @@ def worker_loop():
                 with lock:
                     inflight[req_id]["english_text"] = english_text
                 log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
-
             except Exception as e:
-                # 실패 시 fallback
                 w = job.get("weather", {})
                 english_text = (
                     f"{w.get('areaName','Unknown area')}: "
@@ -161,12 +170,12 @@ def worker_loop():
                     inflight[req_id]["english_text"] = english_text
                 log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
 
-            # 제너레이터 호출
             with httpx.Client(timeout=10) as cli:
                 gen_body = {
                     "request_id": req_id,
                     "user_id": job["user_id"],
                     "img": job.get("img"),
+                    "shutdown": job.get("shutdown"),
                     "english_text": english_text,
                 }
                 if not GENERATOR_ENDPOINT:
@@ -178,12 +187,12 @@ def worker_loop():
                     print(f"[GEN_POST_FAIL][{req_id}] {ge}")
                     raise
 
-            # 콜백 대기
             if SERIALIZE_BY_CALLBACK:
                 ok = done_evt.wait(timeout=TTL_SECONDS)
                 if not ok:
                     with lock:
                         inflight.pop(req_id, None)
+
         except Exception as e:
             attempts += 1
             with lock:
@@ -224,7 +233,7 @@ def expiry_sweeper():
                 "event_id": f"evt_{r}_expired",
                 "request_id": r,
                 "user_id": info["user_id"],
-                "prompt": info.get("english_text"),   #  만료 시에도 프롬프트 포함
+                "prompt": info.get("english_text"),
                 "status": "EXPIRED",
                 "message": "callback timeout",
                 "ts": now_utc().isoformat(),
@@ -304,7 +313,6 @@ async def generator_callback(request: Request):
     with lock:
         inflight.pop(cb.request_id, None)
 
-    #  prompt 없으면 inflight에 저장된 english_text 사용
     event = {
         "event_id": cb.event_id,
         "request_id": cb.request_id,
@@ -336,3 +344,10 @@ def stats():
 @app.get("/healthz")
 def health():
     return {"ok": True}
+
+@app.post("/api/comments", response_class=PlainTextResponse)
+def comments_top3(envelope: Envelope):
+    if not envelope.youtube and not envelope.reddit:
+        raise HTTPException(400, "youtube 또는 reddit 중 최소 하나는 포함해야 합니다.")
+    data = summarize_top3_text(envelope.model_dump())
+    return JSONResponse(content=data, status_code=200)
