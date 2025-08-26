@@ -5,7 +5,7 @@ from typing import Optional, Any, Dict
 import httpx
 from fastapi import FastAPI, Body, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
 from llm_client import summarize_to_english, summarize_top3_text
@@ -23,6 +23,8 @@ WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))
 SERIALIZE_BY_CALLBACK = True
 
 print("GENERATOR_ENDPOINT =", GENERATOR_ENDPOINT)
+print("KAFKA_BOOTSTRAP =", KAFKA_BOOTSTRAP)
+print("KAFKA_TOPIC =", KAFKA_TOPIC)
 KST = timezone(timedelta(hours=9))
 
 # Kafka 설정
@@ -57,25 +59,12 @@ class Weather(BaseModel):
 
 class BridgeIn(BaseModel):
     img: str
-    user_id: str
+    userId: str
     shutdown: bool = False
     weather: Weather
     youtube: Optional[Dict[str, Any]] = None
     reddit: Optional[Dict[str, Any]] = None
     user: Optional[Dict[str, Any]] = None
-
-class CallbackIn(BaseModel):
-    request_id: str
-    event_id: str
-    prompt_id: Optional[str] = None
-    video_id: Optional[str] = None
-    prompt: Optional[str] = None
-    video_path: Optional[str] = None
-    video_s3_bucket: Optional[str] = None
-    video_s3_key: Optional[str] = None
-    video_url: Optional[str] = None
-    status: str = Field(..., pattern="^(SUCCESS|FAILED)$")
-    message: Optional[str] = None
 
 class Envelope(BaseModel):
     youtube: Optional[Dict[str, Any]] = None
@@ -101,16 +90,6 @@ def log_once(req_id: str, msg: str):
             print(msg)
             printed.add(req_id)
 
-def _to_iso_kst_from_unix(ts: Optional[float]) -> Optional[str]:
-    if ts is None: return None
-    try:
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(KST).isoformat()
-    except Exception:
-        return None
-
-# -------------------
-# Helpers
-# -------------------
 def make_id():
     return "req_" + uuid.uuid4().hex
 
@@ -124,9 +103,22 @@ def hmac_ok(raw_body: bytes, signature: str, secret: str) -> bool:
     return hmac.compare_digest(mac, sig)
 
 def produce_kafka(event_key: str, value: dict):
-    producer.produce(topic=KAFKA_TOPIC, key=event_key,
-                     value=json.dumps(value, ensure_ascii=False).encode("utf-8"))
-    producer.flush(5)
+    def delivery_report(err, msg):
+        if err is not None:
+            print(f"[KAFKA_ERROR] Delivery failed for key={event_key}: {err}")
+        else:
+            print(f"[KAFKA_OK] Delivered to {msg.topic()} [{msg.partition()}] offset {msg.offset()}")
+
+    try:
+        producer.produce(
+            topic=KAFKA_TOPIC,
+            key=event_key,
+            value=json.dumps(value, ensure_ascii=False).encode("utf-8"),
+            callback=delivery_report
+        )
+        producer.flush(5)
+    except Exception as e:
+        print(f"[KAFKA_EXCEPTION] {e}")
 
 # -------------------
 # Worker
@@ -135,28 +127,28 @@ def worker_loop():
     print("Worker thread started!")
     while True:
         job = job_queue.get()
-        print(f"[Worker] Dequeued job {job['request_id']} for user {job['user_id']}")
+        print(f"[Worker] Dequeued job {job['requestId']} for user {job['userId']}")
         attempts = job.get("_attempts", 0)
-        req_id = job["request_id"]
+        req_id = job["requestId"]
 
         done_evt = threading.Event()
         try:
             with lock:
                 inflight[req_id] = {
-                    "user_id": job["user_id"],
+                    "userId": job["userId"],
                     "payload": job,
                     "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
-                    "enqueued_at": job.get("_enqueued_at", now_utc().isoformat()),
-                    "done_evt": done_evt,
+                    "enqueuedAt": job.get("_enqueuedAt", now_utc().isoformat()),
+                    "doneEvt": done_evt,
                 }
 
             try:
-                english_text = job.get("_english_text")
+                english_text = job.get("_englishText")
                 if not english_text:
                     english_text = summarize_to_english(job)
-                    job["_english_text"] = english_text
+                    job["_englishText"] = english_text
                 with lock:
-                    inflight[req_id]["english_text"] = english_text
+                    inflight[req_id]["englishText"] = english_text
                 log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
             except Exception as e:
                 w = job.get("weather", {})
@@ -165,18 +157,18 @@ def worker_loop():
                     f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
                     f"UV {w.get('uvIndex','?')}."
                 )
-                job["_english_text"] = english_text
+                job["_englishText"] = english_text
                 with lock:
-                    inflight[req_id]["english_text"] = english_text
+                    inflight[req_id]["englishText"] = english_text
                 log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
 
             with httpx.Client(timeout=10) as cli:
                 gen_body = {
-                    "request_id": req_id,
-                    "user_id": job["user_id"],
+                    "requestId": req_id,
+                    "userId": job["userId"],
                     "img": job.get("img"),
                     "shutdown": job.get("shutdown"),
-                    "english_text": english_text,
+                    "englishText": english_text,
                 }
                 if not GENERATOR_ENDPOINT:
                     raise RuntimeError("GENERATOR_ENDPOINT is not set")
@@ -204,15 +196,14 @@ def worker_loop():
                 job_queue.put(job)
             else:
                 event = {
-                    "event_id": f"evt_{req_id}_bridge_fail",
-                    "request_id": req_id,
-                    "user_id": job["user_id"],
+                    "eventId": f"evt_{req_id}_bridge_fail",
+                    "requestId": req_id,
+                    "userId": job["userId"],
                     "status": "FAILED",
                     "message": f"bridge->generator call failed after retries: {e}",
-                    "ts": now_utc().isoformat(),
-                    "schema_version": 1
+                    "createdAt": now_utc().isoformat()
                 }
-                produce_kafka(event["event_id"], event)
+                produce_kafka(event["eventId"], event)
         finally:
             job_queue.task_done()
 
@@ -230,16 +221,15 @@ def expiry_sweeper():
             if not info:
                 continue
             event = {
-                "event_id": f"evt_{r}_expired",
-                "request_id": r,
-                "user_id": info["user_id"],
-                "prompt": info.get("english_text"),
-                "status": "EXPIRED",
+                "eventId": f"evt_{r}_expired",
+                "requestId": r,
+                "userId": info["userId"],
+                "prompt": info.get("englishText"),
+                "status": "FAILED",
                 "message": "callback timeout",
-                "ts": now_utc().isoformat(),
-                "schema_version": 1
+                "createdAt": now_utc().isoformat()
             }
-            produce_kafka(event["event_id"], event)
+            produce_kafka(event["eventId"], event)
         if expired:
             producer.flush(5)
 
@@ -275,7 +265,7 @@ def enqueue_generate_video(
         raise HTTPException(400, str(e))
 
     derived_key = idem_key or body_hash({
-        "user_id": data["user_id"],
+        "userId": data["userId"],
         "weather": data["weather"],
         "youtube": data.get("youtube"),
         "reddit": data.get("reddit"),
@@ -284,25 +274,27 @@ def enqueue_generate_video(
     with lock:
         if derived_key in idemp_index:
             req_id = idemp_index[derived_key]
-            return JSONResponse({"request_id": req_id, "enqueued": True, "deduplicated": True})
+            return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": True})
         req_id = make_id()
         idemp_index[derived_key] = req_id
 
-    job = {**data, "request_id": req_id, "_enqueued_at": now_utc().isoformat()}
+    job = {**data, "requestId": req_id, "_enqueuedAt": now_utc().isoformat()}
     job_queue.put(job)
-    return JSONResponse({"request_id": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
+    return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
 
 @app.post("/api/video/callback")
 async def generator_callback(request: Request):
     raw = await request.body()
     try:
-        cb = CallbackIn(**json.loads(raw.decode("utf-8")))
+        cb = json.loads(raw.decode("utf-8"))
     except Exception as e:
         raise HTTPException(400, f"invalid callback: {e}")
 
+    print("DEBUG callback raw:", cb)
+
     with lock:
-        info = inflight.get(cb.request_id)
-        done_evt = info.get("done_evt") if info else None
+        info = inflight.get(cb.get("requestId"))
+        done_evt = info.get("doneEvt") if info else None
 
     if info is None:
         return JSONResponse({"ok": True, "late": True})
@@ -311,24 +303,24 @@ async def generator_callback(request: Request):
         done_evt.set()
 
     with lock:
-        inflight.pop(cb.request_id, None)
+        inflight.pop(cb.get("requestId"), None)
 
+    # 🎯 원하는 스키마로 변환
     event = {
-        "event_id": cb.event_id,
-        "request_id": cb.request_id,
-        "user_id": info["user_id"],
-        "prompt_id": cb.prompt_id,
-        "prompt": cb.prompt or info.get("english_text"),
-        "video_path": cb.video_path,
-        "status": cb.status,
-        "message": cb.message,
-        "ts": now_utc().isoformat(),
-        "schema_version": 2
+        "eventId": cb.get("eventId") or f"evt_{cb.get('requestId')}_bridge_fail",
+        "imageKey": cb.get("imageKey") or "images/2025/08/23/38ec51af-a428-4c8f-96ee-a786122f2075.jpg",
+        "userId": int(cb.get("userId")),
+        "prompt": cb.get("prompt") or info.get("englishText") or "프롬포트 예문",
+        "videoKey": cb.get("videoKey") or "asjvijo2084y15f",
+        "status": cb.get("status") or "FAILED",
+        "message": cb.get("message") or "bridge->generator call failed after retries: ",
+        "createdAt": cb.get("createdAt") or now_utc().isoformat()
     }
-    produce_kafka(cb.event_id, event)
-    producer.flush(5)
+
+    produce_kafka(event["eventId"], event)
+
     with lock:
-        completed.add(cb.request_id)
+        completed.add(cb.get("requestId"))
 
     return JSONResponse({"ok": True, "late": False})
 
