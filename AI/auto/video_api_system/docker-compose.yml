@@ -1,49 +1,75 @@
 version: "3.9"
 
 services:
-  zookeeper:
-    image: wurstmeister/zookeeper:3.4.6
-    ports:
-      - "2181:2181"
-
+  # 개발용 Kafka 단일 노드(Redpanda)
   kafka:
-    image: wurstmeister/kafka:2.13-2.8.1
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - 0.0.0.0:9092
+      - --advertise-kafka-addr
+      - kafka:9092
     ports:
       - "9092:9092"
-    environment:
-      # 외부와 내부 모두 접근 가능하도록 리스너 설정
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-    depends_on:
-      - zookeeper
 
+  # 프롬프트 서버 (prompt_service2.py) - 포트 8001
+  prompt:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    environment:
+      # 컨테이너 내부에서 보이는 워크플로 JSON 경로
+      - WORKFLOW_PATH=/app/workflows/testapi1.json
+      # 호스트(로컬 PC)에서 8188 포트로 실행 중인 ComfyUI에 접근
+      - COMFYUI_BASE=http://host.docker.internal:8188
+      # 워크플로 JSON의 노드 ID들(필요 시 실제 키와 맞춰 수정)
+      - KSAMPLER_ID=3
+      - POS_TEXT_ID=6
+      - NEG_TEXT_ID=7
+      # 프롬프트 메모리 TTL(초)
+      - PROMPT_TTL_SEC=86400
+      - BRIDGE_CALLBACK=http://bridge:9000/api/video/callback
+    # Windows 경로 예시 (Docker Desktop에서 D: 드라이브 공유 허용 필요)
+    volumes:
+      - "D:/ComfyUI/workflows/testapi1.json:/app/workflows/testapi1.json:ro"
+    # Linux/맥OS라면 대신 아래와 같이 폴더 마운트 후 파일 경로를 맞춰도 됨
+    # volumes:
+    #   - ./workflows:/app/workflows:ro
+    command: uvicorn prompt_service2:app --host 0.0.0.0 --port 8001 --reload
+    ports:
+      - "8001:8001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # 브리지(큐/콜백) 서버 (app.py) - 포트 9000
   bridge:
     build:
-      context: .
+      context: ./bridge
       dockerfile: Dockerfile
-    command: uvicorn app:app --host 0.0.0.0 --port 8000
-    ports:
-      - "8000:8000"
-    environment:
-      - GENERATOR_ENDPOINT=http://generator:9001/generate
-      - KAFKA_BOOTSTRAP=kafka:9092
-      - KAFKA_TOPIC=video-callback
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
     depends_on:
-      - kafka
-      - generator
-
-  generator:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: uvicorn generator_server:app --host 0.0.0.0 --port 9001
-    ports:
-      - "9001:9001"
+      kafka:
+        condition: service_started
+      prompt:
+        condition: service_started
     environment:
-      - COMFY_BASE_URL=http://host.docker.internal:8188
-      - WORKFLOW_JSON_PATH=/app/videotest3.json
-      - BRIDGE_CALLBACK_URL=http://bridge:8000/api/video/callback
+      # 브리지가 '생성기'로 호출하는 엔드포인트(프롬프트 서버의 실행 API)
+      - GENERATOR_ENDPOINT=${GENERATOR_ENDPOINT}
+      # Kafka 접속 정보
+      - KAFKA_BOOTSTRAP=${KAFKA_BOOTSTRAP}
+      - KAFKA_TOPIC=${KAFKA_TOPIC}
+      # 큐 동작 파라미터
+      - TTL_SECONDS=${TTL_SECONDS}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY}
+      # 콜백 서명 검증을 쓸 경우(선택) 생성기와 공유
+      # - CALLBACK_SECRET=changeme
+    command: uvicorn app:app --host 0.0.0.0 --port 9000 --reload
+    ports:
+      - "9000:9000"
