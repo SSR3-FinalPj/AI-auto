@@ -1,0 +1,260 @@
+{
+  "12": {
+    "inputs": {
+      "vae_name": "hunyuan_video_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE 로드"
+    }
+  },
+  "13": {
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "llava_llama3_fp16.safetensors",
+      "type": "hunyuan_video",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "이중 CLIP 로드"
+    }
+  },
+  "17": {
+    "inputs": {
+      "crop": "center",
+      "clip_vision": [
+        "18",
+        0
+      ],
+      "image": [
+        "48",
+        0
+      ]
+    },
+    "class_type": "CLIPVisionEncode",
+    "_meta": {
+      "title": "CLIP_VISION 인코딩"
+    }
+  },
+  "18": {
+    "inputs": {
+      "clip_name": "sigclip_vision_patch14_384.safetensors"
+    },
+    "class_type": "CLIPVisionLoader",
+    "_meta": {
+      "title": "CLIP_VISION 로드"
+    }
+  },
+  "20": {
+    "inputs": {
+      "pixels": [
+        "48",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE 인코드"
+    }
+  },
+  "23": {
+    "inputs": {
+      "frame_rate": 30,
+      "loop_count": 0,
+      "filename_prefix": "Youtube",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": false,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "33": {
+    "inputs": {
+      "tile_size": 256,
+      "overlap": 64,
+      "temporal_size": 8,
+      "temporal_overlap": 8,
+      "samples": [
+        "70",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeTiled",
+    "_meta": {
+      "title": "VAE 디코드 (타일)"
+    }
+  },
+  "44": {
+    "inputs": {
+      "image": [
+        "33",
+        0
+      ]
+    },
+    "class_type": "GetImageSizeAndCount",
+    "_meta": {
+      "title": "Get Image Size & Count"
+    }
+  },
+  "48": {
+    "inputs": {
+      "image": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "GetImageSizeAndCount",
+    "_meta": {
+      "title": "Get Image Size & Count"
+    }
+  },
+  "50": {
+    "inputs": {
+      "width": [
+        "51",
+        0
+      ],
+      "height": [
+        "51",
+        1
+      ],
+      "interpolation": "lanczos",
+      "method": "stretch",
+      "condition": "always",
+      "multiple_of": 0,
+      "image": [
+        "72",
+        0
+      ]
+    },
+    "class_type": "ImageResize+",
+    "_meta": {
+      "title": "🔧 Image Resize"
+    }
+  },
+  "51": {
+    "inputs": {
+      "base_resolution": 640,
+      "image": [
+        "72",
+        0
+      ]
+    },
+    "class_type": "FramePackFindNearestBucket",
+    "_meta": {
+      "title": "Find Nearest Bucket"
+    }
+  },
+  "52": {
+    "inputs": {
+      "model": "FramePackI2V_HY_fp8_e4m3fn.safetensors",
+      "base_precision": "bf16",
+      "quantization": "fp8_e4m3fn",
+      "load_device": "offload_device",
+      "attention_mode": "sdpa"
+    },
+    "class_type": "LoadFramePackModel",
+    "_meta": {
+      "title": "Load FramePackModel"
+    }
+  },
+  "70": {
+    "inputs": {
+      "steps": 15,
+      "use_teacache": true,
+      "teacache_rel_l1_thresh": 0.15000000000000002,
+      "cfg": 1.0000000000000002,
+      "guidance_scale": 10.000000000000002,
+      "shift": 0,
+      "seed": 1113888905790971,
+      "gpu_memory_preservation": 6,
+      "sampler": "unipc_bh1",
+      "embed_interpolation": "disabled",
+      "start_embed_strength": 1,
+      "denoise_strength": 1,
+      "model": [
+        "52",
+        0
+      ],
+      "positive_timed_data": [
+        "71",
+        0
+      ],
+      "negative": [
+        "71",
+        1
+      ],
+      "start_latent": [
+        "20",
+        0
+      ],
+      "start_image_embeds": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "FramePackSampler_F1",
+    "_meta": {
+      "title": "FramePackSampler (F1)"
+    }
+  },
+  "71": {
+    "inputs": {
+      "text": "[0s-5s When raining the sky, you can see the darkness background] ",
+      "negative_text": "",
+      "total_second_length": 1,
+      "latent_window_size": 9,
+      "prompt_blend_sections": 0,
+      "clip": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "FramePackTimestampedTextEncode",
+    "_meta": {
+      "title": "FramePack Text Encode (Enhanced)"
+    }
+  },
+  "72": {
+    "inputs": {
+      "image": "b037fdf8-66b2-4355-83b9-bb57bd240ee1.png"
+    },
+    "class_type": "LoadImageS3",
+    "_meta": {
+      "title": "Load Image from S3"
+    }
+  },
+  "74": {
+    "inputs": {
+      "filename_prefix": "Youtube",
+      "filenames": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "SaveVideoFilesS3",
+    "_meta": {
+      "title": "Save Video Files to S3"
+    }
+  }
+}
