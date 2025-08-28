@@ -3,6 +3,8 @@ version: "3.9"
 services:
   zookeeper:
     image: bitnami/zookeeper:3.9
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
     ports:
       - "2181:2181"
 
@@ -42,7 +44,7 @@ services:
       dockerfile: Dockerfile
     command: uvicorn generator_server:app --host 0.0.0.0 --port 9001
     ports:
-      - "9001:9001"
+      - "19001:19001"
     environment:
       - COMFY_BASE_URL=http://host.docker.internal:8188
       - WORKFLOW_JSON_PATH=/app/videotest3.json

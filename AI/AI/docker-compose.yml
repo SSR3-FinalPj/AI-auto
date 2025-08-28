@@ -1,9 +1,14 @@
-version : "3.8"
+version: "3.9"
+
 services:
-  prompt:
-    build: 
-      context: ./prompt
-    image: prompt_app:local
-    command: uvicorn prompt_service:app --host 0.0.0.0 --port 8001 --reload
+  generator:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    command: uvicorn generator_server:app --host 0.0.0.0 --port 9001
     ports:
-      - "8001:8001"
+      - "19001:19001"
+    environment:
+      - COMFY_BASE_URL=http://host.docker.internal:8188
+      - WORKFLOW_JSON_PATH=/app/videotest3.json
+      - BRIDGE_CALLBACK_URL=http://bridge:8000/api/video/callback
