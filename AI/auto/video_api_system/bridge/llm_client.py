@@ -1,6 +1,6 @@
-# llm_client.py  — REST 버전 + lazy key + 소셜/유저 반영 + 안정 프롬프트
+# llm_client.py 
 import os, json, time
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional
 import httpx
 from dotenv import load_dotenv
 
@@ -72,7 +72,7 @@ context: { "topic":"string|null" }
 """).strip()
 
 def _get_api_key() -> str:
-    # import 시점이 아닌 호출 시점에 키를 읽어 예외를 뒤로 미룹니다.
+    # import 시점이 아닌 호출 시점에 키를 읽어 예외를 뒤로 미룸
     key = (os.getenv("GOOGLE_API_KEY") or "").strip().strip('"').strip("'")
     if not key:
         raise RuntimeError("GOOGLE_API_KEY is not set")
@@ -81,9 +81,11 @@ def _get_api_key() -> str:
         raise RuntimeError("GOOGLE_API_KEY contains control characters")
     return key
 
+#모델명. 
 def _model_name() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
+#표준화 
 def _normalize_social(payload: Dict[str, Any]) -> Dict[str, Any]:
     y = ((payload.get("youtube") or {}).get("additionalProp1") or {}).copy()
     r = ((payload.get("reddit")  or {}).get("additionalProp1") or {}).copy()
@@ -111,6 +113,7 @@ def _normalize_social(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     return {"youtube": y or None, "reddit": r or None, "user_notes": user_notes}
 
+#프롬프트 생성 함수 
 def _build_user_prompt(payload: Dict[str, Any]) -> str:
     w = payload.get("weather") or {}
     social = _normalize_social(payload)
@@ -172,7 +175,8 @@ def summarize_to_english(payload: Dict[str, Any]) -> str:
                 time.sleep(0.6*(i+1))
             else:
                 raise RuntimeError(f"Gemini REST failed: {e}") from e
-            
+
+#댓글에 관한 gemini api call (통합 고려)    
 def _call_gemini(promptA: str, promptB: str) -> str:
     api_key = _get_api_key()
     model   = _model_name()
@@ -195,7 +199,8 @@ def _call_gemini(promptA: str, promptB: str) -> str:
                 time.sleep(0.5 * (i+1))
             else:
                 raise RuntimeError(f"Gemini REST failed: {e}") from e
-            
+
+#상위 3개 댓글 분석 
 def summarize_top3_text(envelope: dict) -> str:
     """
     envelope: {"youtube": {...} | None, "reddit": {...} | None, "topic": str|None}
