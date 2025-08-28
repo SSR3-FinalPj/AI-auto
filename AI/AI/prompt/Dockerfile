@@ -1,10 +1,14 @@
 FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
+# 앱 소스 복사
 COPY . .
-EXPOSE 8000
 
-CMD ["uvicorn", "prompt_service:app", "--host", "0.0.0.0", "--post", "8001"]
+EXPOSE 8000 9001
