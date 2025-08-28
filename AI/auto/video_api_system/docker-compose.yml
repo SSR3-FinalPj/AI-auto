@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   zookeeper:
-    image: wurstmeister/zookeeper:3.4.6
+    image: bitnami/zookeeper:3.9
     ports:
       - "2181:2181"
 
@@ -21,13 +21,13 @@ services:
 
   bridge:
     build:
-      context: .
+      context: ./bridge
       dockerfile: Dockerfile
     command: uvicorn app:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     environment:
-      - GENERATOR_ENDPOINT=http://generator:9001/generate
+      - GENERATOR_ENDPOINT=http://server.comfygpu.kro.kr/generate
       - KAFKA_BOOTSTRAP=kafka:9092
       - KAFKA_TOPIC=video-callback
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
@@ -38,7 +38,7 @@ services:
 
   generator:
     build:
-      context: .
+      context: ./bridge
       dockerfile: Dockerfile
     command: uvicorn generator_server:app --host 0.0.0.0 --port 9001
     ports:

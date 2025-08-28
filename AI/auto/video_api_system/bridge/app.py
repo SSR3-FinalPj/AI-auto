@@ -60,6 +60,7 @@ class Weather(BaseModel):
 class BridgeIn(BaseModel):
     img: str
     userId: str
+    purpose: str
     shutdown: bool = False
     weather: Weather
     youtube: Optional[Dict[str, Any]] = None
@@ -266,6 +267,7 @@ def enqueue_generate_video(
 
     derived_key = idem_key or body_hash({
         "userId": data["userId"],
+        "purpose": data["purpose"],
         "weather": data["weather"],
         "youtube": data.get("youtube"),
         "reddit": data.get("reddit"),
@@ -311,8 +313,9 @@ async def generator_callback(request: Request):
         "imageKey": cb.get("imageKey") or info["payload"].get("img"),
         "userId": int(cb.get("userId")),
         "prompt": cb.get("prompt") or info.get("englishText"),
+        "type": cb.get("type") or info.get("purpose"),
         # videoKey: 성공일 때만, 실패면 None
-        "videoKey": cb.get("videoKey") if cb.get("status") == "SUCCESS" else "testname1557.mp4",
+        "resultKey": cb.get("resultKey") if cb.get("status") == "SUCCESS" else "testname1557.mp4",
         "status": cb.get("status") or "FAILED",
         "message": cb.get("message") or "bridge->generator call failed after retries: ",
         "createdAt": cb.get("createdAt") or now_utc().isoformat()

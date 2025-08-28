@@ -135,7 +135,7 @@ def _build_user_prompt(payload: Dict[str, Any]) -> str:
         "user":    {"notes": social["user_notes"]} if social["user_notes"] else None
     }
 
-    # SYSTEM에 이미 전체 지시가 있으므로 여기서는 “3문장만” 같은 제약을 다시 쓰지 않습니다.
+    # SYSTEM에 이미 전체 지시가 있음
     return (
         "JSON is provided. Follow the SYSTEM instructions above for weather/crowd and for social if present."
         f"{hint}\nJSON:\n" + json.dumps(json_payload, ensure_ascii=False)
