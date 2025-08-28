@@ -1,3 +1,4 @@
+# generator_server.py
 import os
 import json
 import uuid
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 
 # ===== 환경 변수 =====
 COMFY_BASE_URL     = os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188")
-WORKFLOW_JSON_PATH = Path(os.getenv("WORKFLOW_JSON_PATH", "./videotest3.json")).resolve()
+WORKFLOW_JSON_PATH = Path(os.getenv("WORKFLOW_JSON_PATH", "./videotest4.json")).resolve()
 BRIDGE_CALLBACK_URL= os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8000/api/video/callback")
 POLL_INTERVAL      = float(os.getenv("POLL_INTERVAL", "2.0"))
 POLL_TIMEOUT       = int(os.getenv("POLL_TIMEOUT", "36000"))  # 초
@@ -26,7 +27,7 @@ class GenIn(BaseModel):
     requestId: str
     userId: str
     img: Optional[str] = None
-    englishText: Optional[str] = ""
+    prompt_text: Optional[str] = ""   # prompt_text 그대로 유지
 
 # -------------------
 # Utils
@@ -113,7 +114,7 @@ async def _callback_bridge_fail(requestId: str, userId: Optional[str], msg: str)
 # -------------------
 # FastAPI
 # -------------------
-app = FastAPI(title="Generator Server for ComfyUI (videotest3, JSON pre-modify)")
+app = FastAPI(title="Generator Server for ComfyUI (videotest4, JSON pre-modify)")
 
 @app.post("/generate")
 async def generate(payload: GenIn = Body(...)):
@@ -127,9 +128,18 @@ async def generate(payload: GenIn = Body(...)):
         return JSONResponse({"ok": False, "error": "img missing"}, status_code=400)
 
     wf = json.loads(WORKFLOW_JSON_PATH.read_text(encoding="utf-8"))
+
+    # === 워크플로우 패치 부분만 수정 ===
+    # LoadImageS3 노드(72)에 이미지 주입
     if "72" in wf and isinstance(wf["72"], dict):
-        wf["72"].setdefault("inputs", {})
-        wf["72"]["inputs"]["image"] = payload.img
+        wf["72"].setdefault("widgets_values", [""])
+        wf["72"]["widgets_values"][0] = payload.img
+
+    # FramePackTimestampedTextEncode 노드(71)에 프롬프트 주입
+    if "71" in wf and isinstance(wf["71"], dict):
+        wf["71"].setdefault("widgets_values", ["", "", 1, 9, 0])
+        wf["71"]["widgets_values"][0] = payload.prompt_text or wf["71"]["widgets_values"][0]
+
     WORKFLOW_JSON_PATH.write_text(json.dumps(wf, indent=2, ensure_ascii=False), encoding="utf-8")
     patched = json.loads(WORKFLOW_JSON_PATH.read_text(encoding="utf-8"))
 
@@ -142,7 +152,7 @@ async def generate(payload: GenIn = Body(...)):
     async def _bg():
         try:
             filename, view_url = await _poll_history_for_mp4(prompt_id)
-            await _callback_bridge_success(payload.requestId, payload.userId, payload.englishText or "", filename, view_url)
+            await _callback_bridge_success(payload.requestId, payload.userId, payload.prompt_text or "", filename, view_url)
         except Exception as e:
             await _callback_bridge_fail(payload.requestId, payload.userId, str(e))
 

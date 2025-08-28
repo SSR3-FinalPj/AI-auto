@@ -1,3 +1,4 @@
+# generator_server2.py
 import os
 import json
 import uuid
@@ -13,11 +14,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # ===== 환경 변수 =====
-COMFY_BASE_URL     = os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188")
-WORKFLOW_JSON_PATH = Path(os.getenv("WORKFLOW_JSON_PATH", "./videotest3.json")).resolve()
-BRIDGE_CALLBACK_URL= os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8000/api/video/callback")
-POLL_INTERVAL      = float(os.getenv("POLL_INTERVAL", "2.0"))
-POLL_TIMEOUT       = int(os.getenv("POLL_TIMEOUT", "36000"))  # 초
+COMFY_BASE_URL      = os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188")
+WORKFLOW_JSON_PATH  = Path(os.getenv("WORKFLOW_JSON_PATH", "./imagetest3.json")).resolve()
+BRIDGE_CALLBACK_URL = os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8000/api/video/callback")
+POLL_INTERVAL       = float(os.getenv("POLL_INTERVAL", "2.0"))
+POLL_TIMEOUT        = int(os.getenv("POLL_TIMEOUT", "36000"))  # 초
 
 # -------------------
 # Models
@@ -26,7 +27,7 @@ class GenIn(BaseModel):
     requestId: str
     userId: str
     img: Optional[str] = None
-    englishText: Optional[str] = ""
+    prompt_text: Optional[str] = ""   # generator_server와 동일하게 prompt_text 사용
 
 # -------------------
 # Utils
@@ -43,7 +44,7 @@ async def _submit_to_comfy(patched_workflow: Dict[str, Any]) -> str:
         raise RuntimeError("ComfyUI가 prompt_id를 반환하지 않았습니다.")
     return pid
 
-async def _poll_history_for_mp4(prompt_id: str) -> Tuple[str, Optional[str]]:
+async def _poll_history_for_result(prompt_id: str) -> Tuple[str, Optional[str]]:
     deadline = asyncio.get_event_loop().time() + POLL_TIMEOUT
     async with httpx.AsyncClient(timeout=30) as cli:
         while True:
@@ -56,22 +57,22 @@ async def _poll_history_for_mp4(prompt_id: str) -> Tuple[str, Optional[str]]:
             r.raise_for_status()
             hist = r.json() or {}
 
-            mp4s = []
+            images = []
             for _, v in hist.items():
                 outputs = v.get("outputs") or {}
                 for _, items in outputs.items():
                     if isinstance(items, list):
                         for it in items:
                             fn = it.get("filename")
-                            if fn and fn.lower().endswith(".mp4"):
-                                mp4s.append(fn)
-            if mp4s:
-                filename = mp4s[-1]
+                            if fn and (fn.lower().endswith(".png") or fn.lower().endswith(".jpg")):
+                                images.append(fn)
+            if images:
+                filename = images[-1]
                 q = urlencode({"filename": filename, "type": "output"})
                 return filename, f"{COMFY_BASE_URL}/view?{q}"
 
             if asyncio.get_event_loop().time() > deadline:
-                raise TimeoutError("ComfyUI history polling timeout (no mp4)")
+                raise TimeoutError("ComfyUI history polling timeout (no image)")
             await asyncio.sleep(POLL_INTERVAL)
 
 async def _callback_bridge_success(requestId: str,
@@ -85,13 +86,13 @@ async def _callback_bridge_success(requestId: str,
         "requestId": requestId,
         "prompt": prompt_text or "",
         "status": "SUCCESS",
-        "message": "video generation completed",
+        "message": "image generation completed",
         "createdAt": datetime.now().isoformat()
     }
     if filename:
-        payload["videoKey"] = filename
+        payload["imageKey"] = filename
     if comfy_view_url:
-        payload["imageKey"] = comfy_view_url
+        payload["comfyUrl"] = comfy_view_url
     async with httpx.AsyncClient(timeout=30) as cli:
         await cli.post(BRIDGE_CALLBACK_URL, json=payload)
 
@@ -113,7 +114,7 @@ async def _callback_bridge_fail(requestId: str, userId: Optional[str], msg: str)
 # -------------------
 # FastAPI
 # -------------------
-app = FastAPI(title="Generator Server for ComfyUI (videotest3, JSON pre-modify)")
+app = FastAPI(title="Generator Server for ComfyUI (imagetest3, JSON pre-modify)")
 
 @app.post("/generate")
 async def generate(payload: GenIn = Body(...)):
@@ -127,9 +128,17 @@ async def generate(payload: GenIn = Body(...)):
         return JSONResponse({"ok": False, "error": "img missing"}, status_code=400)
 
     wf = json.loads(WORKFLOW_JSON_PATH.read_text(encoding="utf-8"))
-    if "72" in wf and isinstance(wf["72"], dict):
-        wf["72"].setdefault("inputs", {})
-        wf["72"]["inputs"]["image"] = payload.img
+
+    # LoadImageS3 노드(21)에 이미지 주입
+    if "21" in wf and isinstance(wf["21"], dict):
+        wf["21"].setdefault("inputs", {})
+        wf["21"]["inputs"]["image"] = payload.img
+
+    # CLIPTextEncode 노드(6)에 프롬프트 텍스트 주입
+    if "6" in wf and isinstance(wf["6"], dict):
+        wf["6"].setdefault("inputs", {})
+        wf["6"]["inputs"]["text"] = payload.prompt_text or wf["6"]["inputs"].get("text", "")
+
     WORKFLOW_JSON_PATH.write_text(json.dumps(wf, indent=2, ensure_ascii=False), encoding="utf-8")
     patched = json.loads(WORKFLOW_JSON_PATH.read_text(encoding="utf-8"))
 
@@ -141,8 +150,8 @@ async def generate(payload: GenIn = Body(...)):
 
     async def _bg():
         try:
-            filename, view_url = await _poll_history_for_mp4(prompt_id)
-            await _callback_bridge_success(payload.requestId, payload.userId, payload.englishText or "", filename, view_url)
+            filename, view_url = await _poll_history_for_result(prompt_id)
+            await _callback_bridge_success(payload.requestId, payload.userId, payload.prompt_text or "", filename, view_url)
         except Exception as e:
             await _callback_bridge_fail(payload.requestId, payload.userId, str(e))
 
