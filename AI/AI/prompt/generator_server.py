@@ -15,7 +15,7 @@ from pydantic import BaseModel
 # ===== 환경 변수 =====
 COMFY_BASE_URL     = os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188")
 WORKFLOW_JSON_PATH = Path(os.getenv("WORKFLOW_JSON_PATH", "./videotest3.json")).resolve()
-BRIDGE_CALLBACK_URL= os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8000/api/video/callback")
+BRIDGE_CALLBACK_URL= os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8001/api/video/callback")
 POLL_INTERVAL      = float(os.getenv("POLL_INTERVAL", "2.0"))
 POLL_TIMEOUT       = int(os.getenv("POLL_TIMEOUT", "36000"))  # 초
 
@@ -88,8 +88,9 @@ async def _callback_bridge_success(requestId: str,
         "message": "video generation completed",
         "createdAt": datetime.now().isoformat()
     }
+    # 옵션 A 수정: videoKey → resultKey
     if filename:
-        payload["videoKey"] = filename
+        payload["resultKey"] = filename
     if comfy_view_url:
         payload["imageKey"] = comfy_view_url
     async with httpx.AsyncClient(timeout=30) as cli:
