@@ -16,13 +16,15 @@ Weather & Crowd (always present):
 3) One actionable suggestion (hydration, sun protection, walking time, etc.).
 Each sentence should be 15–25 words. No lists, emojis, or hashtags.
 
-YouTube, Reddit, and User (only if data exists):
-- Write up to 4 additional sentences (one per item).
-1) YouTube: include video_id, view_count, like_count, comment_count, and a brief engagement trend with a feels-like description.
-2) Reddit: include video_id, score, upvotes_estimated, downvotes_estimated, num_comments, and the general tone of comments.
-3) User: reflect user notes or preferences as the highest priority in wording.
-4) Provide one actionable suggestion to improve engagement (e.g., encourage likes, comments, or views).
-Each sentence should be 15–25 words. No lists, emojis, or hashtags.
+User Notes (only if data exists):
+- Write up to 2 additional sentences. Each sentence must be 15–25 words. No lists, emojis, or hashtags.
+1) Faithfully reflect the user's notes or preferences with high fidelity: preserve key phrases and explicit wording where provided; do not contradict or overwrite them; no hallucinations.
+2) Provide one actionable suggestion tailored to those notes to improve the user’s experience or engagement.
+
+General rules:
+- Output only sentences in a single paragraph with normal punctuation—no headings, labels, or bullet points.
+- Do not invent numbers; if a value is absent, acknowledge its absence succinctly rather than guessing.
+- Keep the tone neutral, practical, and concise.
 ''').strip()
 
 ANALYSIS = ("""
@@ -87,61 +89,27 @@ def _model_name() -> str:
 
 #표준화 
 def _normalize_social(payload: Dict[str, Any]) -> Dict[str, Any]:
-    y = ((payload.get("youtube") or {}).get("additionalProp1") or {}).copy()
-    r = ((payload.get("reddit")  or {}).get("additionalProp1") or {}).copy()
     u = ((payload.get("user")    or {}).get("additionalProp1") or {}).copy()
-
-    # YouTube 키 표준화
-    y["video_id"]      = y.get("video_id")
-    y["view_count"]    = y.get("view_count") or y.get("views")
-    y["like_count"]    = y.get("like_count") or y.get("likes") or y.get("like")
-    y["comment_count"] = y.get("comment_count") or y.get("comments_count") or y.get("comment")
-    if isinstance(y.get("comments"), str):
-        y["sample_comment"] = y["comments"]
-
-    # Reddit 키 표준화
-    r["video_id"]             = r.get("video_id")
-    r["score"]                = r.get("score")
-    r["upvotes_estimated"]    = r.get("upvotes_estimated") or r.get("upvotes")
-    r["downvotes_estimated"]  = r.get("downvotes_estimated") or r.get("downvotes")
-    r["num_comments"]         = r.get("num_comments") or r.get("numcomment")
-    if isinstance(r.get("comments"), str):
-        r["sample_comment"] = r["comments"]
 
     # User 노트
     user_notes = u.get("notes") or u.get("note")
 
-    return {"youtube": y or None, "reddit": r or None, "user_notes": user_notes}
+    return {"user_notes": user_notes}
 
 #프롬프트 생성 함수 
 def _build_user_prompt(payload: Dict[str, Any]) -> str:
     w = payload.get("weather") or {}
     social = _normalize_social(payload)
 
-    # 참여도 힌트(있으면)
-    hint = ""
-    try:
-        likes = int(str((social["youtube"] or {}).get("like_count",    "0")))
-        cmt   = int(str((social["youtube"] or {}).get("comment_count", "0")))
-        views = int(str((social["youtube"] or {}).get("view_count",    "0")))
-        score = int(str((social["reddit"]  or {}).get("score",         "0")))
-        rcmts = int(str((social["reddit"]  or {}).get("num_comments",  "0")))
-        if (likes + cmt + views + score + rcmts) > 0:
-            hint = f"\nEngagement hint: yt_views={views}, yt_likes={likes}, yt_comments={cmt}, reddit_score={score}, reddit_comments={rcmts}."
-    except Exception:
-        pass
-
     json_payload = {
         "weather": w,
-        "youtube": social["youtube"],
-        "reddit":  social["reddit"],
         "user":    {"notes": social["user_notes"]} if social["user_notes"] else None
     }
 
     # SYSTEM에 이미 전체 지시가 있음
     return (
         "JSON is provided. Follow the SYSTEM instructions above for weather/crowd and for social if present."
-        f"{hint}\nJSON:\n" + json.dumps(json_payload, ensure_ascii=False)
+        f"JSON:\n" + json.dumps(json_payload, ensure_ascii=False)
     )
 
 def summarize_to_english(payload: Dict[str, Any]) -> str:

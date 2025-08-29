@@ -4,7 +4,7 @@ from typing import Optional, Any, Dict
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
@@ -59,12 +59,10 @@ class Weather(BaseModel):
 
 class BridgeIn(BaseModel):
     img: str
-    userId: str
-    purpose: str
-    shutdown: bool = False
+    jobId: str
+    platform: str
+    isclient: bool = False
     weather: Weather
-    youtube: Optional[Dict[str, Any]] = None
-    reddit: Optional[Dict[str, Any]] = None
     user: Optional[Dict[str, Any]] = None
 
 class Envelope(BaseModel):
@@ -128,7 +126,7 @@ def worker_loop():
     print("Worker thread started!")
     while True:
         job = job_queue.get()
-        print(f"[Worker] Dequeued job {job['requestId']} for user {job['userId']}")
+        print(f"[Worker] Dequeued job {job['requestId']} for user {job['jobId']}")
         attempts = job.get("_attempts", 0)
         req_id = job["requestId"]
 
@@ -136,7 +134,7 @@ def worker_loop():
         try:
             with lock:
                 inflight[req_id] = {
-                    "userId": job["userId"],
+                    "jobId": job["jobId"],
                     "payload": job,
                     "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
                     "enqueuedAt": job.get("_enqueuedAt", now_utc().isoformat()),
@@ -166,9 +164,9 @@ def worker_loop():
             with httpx.Client(timeout=10) as cli:
                 gen_body = {
                     "requestId": req_id,
-                    "userId": job["userId"],
+                    "jobId": job["jobId"],
                     "img": job.get("img"),
-                    "shutdown": job.get("shutdown"),
+                    "isclient": job.get("isclient"),
                     "englishText": english_text,
                 }
                 if not GENERATOR_ENDPOINT:
@@ -199,7 +197,7 @@ def worker_loop():
                 event = {
                     "eventId": f"evt_{req_id}_bridge_fail",
                     "requestId": req_id,
-                    "userId": job["userId"],
+                    "jobId": job["jobId"],
                     "status": "FAILED",
                     "message": f"bridge->generator call failed after retries: {e}",
                     "createdAt": now_utc().isoformat()
@@ -224,7 +222,7 @@ def expiry_sweeper():
             event = {
                 "eventId": f"evt_{r}_expired",
                 "requestId": r,
-                "userId": info["userId"],
+                "jobId": info["jobId"],
                 "prompt": info.get("englishText"),
                 "status": "FAILED",
                 "message": "callback timeout",
@@ -266,11 +264,9 @@ def enqueue_generate_video(
         raise HTTPException(400, str(e))
 
     derived_key = idem_key or body_hash({
-        "userId": data["userId"],
-        "purpose": data["purpose"],
+        "jobId": data["jobId"],
+        "platform": data["platform"],
         "weather": data["weather"],
-        "youtube": data.get("youtube"),
-        "reddit": data.get("reddit"),
         "user": data.get("user")
     })
     with lock:
@@ -311,11 +307,11 @@ async def generator_callback(request: Request):
         "eventId": cb.get("eventId") or f"evt_{cb.get('requestId')}_bridge_fail",
         # imageKey: Generator 콜백이 없으면 Spring에서 들어온 원본 img 사용
         "imageKey": cb.get("imageKey") or info["payload"].get("img"),
-        "userId": int(cb.get("userId")),
+        "jobId": int(cb.get("jobId")),
         "prompt": cb.get("prompt") or info.get("englishText"),
-        "type": cb.get("type") or info.get("purpose"),
+        "type": cb.get("type") or info.get("platform"),
         # videoKey: 성공일 때만, 실패면 None
-        "resultKey": cb.get("resultKey") if cb.get("status") == "SUCCESS" else "testname1557.mp4",
+        "resultKey": cb.get("resultKey") if cb.get("status") == "SUCCESS" else None,
         "status": cb.get("status") or "FAILED",
         "message": cb.get("message") or "bridge->generator call failed after retries: ",
         "createdAt": cb.get("createdAt") or now_utc().isoformat()
@@ -341,7 +337,7 @@ def stats():
 def health():
     return {"ok": True}
 
-@app.post("/api/comments", response_class=PlainTextResponse)
+@app.post("/api/comments")
 def comments_top3(envelope: Envelope):
     if not envelope.youtube and not envelope.reddit:
         raise HTTPException(400, "youtube 또는 reddit 중 최소 하나는 포함해야 합니다.")

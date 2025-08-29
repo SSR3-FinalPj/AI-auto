@@ -7,8 +7,14 @@ services:
       dockerfile: Dockerfile
     command: uvicorn generator_server:app --host 0.0.0.0 --port 9001
     ports:
-      - "19001:19001"
+      - "19001:9001"
     environment:
       - COMFY_BASE_URL=http://host.docker.internal:8188
       - WORKFLOW_JSON_PATH=/app/videotest3.json
       - BRIDGE_CALLBACK_URL=http://bridge:8000/api/video/callback
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+    volumes:
+      - ./prompt/videotest3.json:/app/videotest3.json
+    restart: unless-stopped
+

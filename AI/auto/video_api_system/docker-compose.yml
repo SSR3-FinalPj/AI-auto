@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   zookeeper:
-    image: bitnami/zookeeper:3.9
+    image: wurstmeister/zookeeper:3.4.6
     container_name: zookeeper
     environment:
       - ALLOW_ANONYMOUS_LOGIN=yes
@@ -15,18 +15,18 @@ services:
       retries: 30
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: wurstmeister/kafka:2.13-2.8.1
     container_name: kafka
     ports:
       - "9092:9092"
     environment:
       # 외부와 내부 모두 접근 가능하도록 리스너 설정
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092 #//localhost:9092,PLAINTEXT_INTERNAL:
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT #,PLAINTEXT_INTERNAL:PLAINTEXT
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092 #//localhost:9092,PLAINTEXT_INTERNAL:
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT #,PLAINTEXT_INTERNAL:PLAINTEXT
 #      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT #_INTERNAL
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092 #, PLAINTEXT_INTERNAL: //:9092
-      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_LISTENERS=PLAINTEXT://:9092 #, PLAINTEXT_INTERNAL: //:9092
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
       - ALLOW_PLAINTEXT_LISTENER=yes
     depends_on:
       - zookeeper
@@ -46,27 +46,17 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - GENERATOR_ENDPOINT=http://server.comfygpu.kro.kr/generate
+      - GENERATOR_ENDPOINT=http://host.docker.internal:19001/generate
       - KAFKA_BOOTSTRAP=kafka:9092
       - KAFKA_TOPIC=video-callback
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
+    extra_hosts:
+    - "host.docker.internal:172.17.0.1"
     depends_on:
       kafka:
         condition: service_healthy
       zookeeper:
         condition: service_healthy
     restart: unless-stopped
-      # - generator
 
-  # generator:
-  #   build:
-  #     context: ../../AI/prompt
-  #     dockerfile: Dockerfile
-  #   command: uvicorn generator_server:app --host 0.0.0.0 --port 19001
-  #   ports:
-  #     - "19001:19001"
-  #   environment:
-  #     - COMFY_BASE_URL=http://host.docker.internal:8188
-  #     - WORKFLOW_JSON_PATH=/app/videotest3.json
-  #     - BRIDGE_CALLBACK_URL=http://bridge:8000/api/video/callback
