@@ -27,6 +27,7 @@ class GenIn(BaseModel):
     userId: str
     img: Optional[str] = None
     englishText: Optional[str] = ""
+    platform: Optional[str] = None  # ✅ youtube | reddit
 
 # -------------------
 # Utils
@@ -74,35 +75,24 @@ async def _poll_history_for_mp4(prompt_id: str) -> Tuple[str, Optional[str]]:
                 raise TimeoutError("ComfyUI history polling timeout (no mp4)")
             await asyncio.sleep(POLL_INTERVAL)
 
-async def _callback_bridge_success(requestId: str,
-                                   userId: str,
-                                   prompt_text: str,
-                                   filename: Optional[str],
-                                   comfy_view_url: Optional[str]) -> None:
+async def _callback_bridge(requestId: str,
+                           userId: str,
+                           platform: Optional[str],
+                           status: str,
+                           message: str,
+                           prompt_text: Optional[str] = "",
+                           filename: Optional[str] = None,
+                           comfy_view_url: Optional[str] = None) -> None:
     payload = {
-        "eventId": f"evt_{requestId}_done",
+        "eventId": f"evt_{requestId}_{'done' if status == 'SUCCESS' else 'failed'}",
+        "imageKey": comfy_view_url or (filename or ""),
         "userId": userId,
         "requestId": requestId,
         "prompt": prompt_text or "",
-        "status": "SUCCESS",
-        "message": "video generation completed",
-        "createdAt": datetime.now().isoformat()
-    }
-    # 옵션 A 수정: videoKey → resultKey
-    if filename:
-        payload["resultKey"] = filename
-    if comfy_view_url:
-        payload["imageKey"] = comfy_view_url
-    async with httpx.AsyncClient(timeout=30) as cli:
-        await cli.post(BRIDGE_CALLBACK_URL, json=payload)
-
-async def _callback_bridge_fail(requestId: str, userId: Optional[str], msg: str) -> None:
-    payload = {
-        "eventId": f"evt_{requestId}_failed",
-        "userId": userId,
-        "requestId": requestId,
-        "status": "FAILED",
-        "message": msg,
+        "resultKey": filename or "",
+        "status": status,
+        "message": message,
+        "resultType": platform or "youtube",  # ✅ 기본 youtube, 없으면 fallback
         "createdAt": datetime.now().isoformat()
     }
     async with httpx.AsyncClient(timeout=30) as cli:
@@ -124,7 +114,7 @@ async def generate(payload: GenIn = Body(...)):
         raise HTTPException(500, f"워크플로 파일 없음: {WORKFLOW_JSON_PATH}")
 
     if not payload.img:
-        await _callback_bridge_fail(payload.requestId, payload.userId, "img 누락")
+        await _callback_bridge(payload.requestId, payload.userId, payload.platform, "FAILED", "img 누락", payload.englishText or "")
         return JSONResponse({"ok": False, "error": "img missing"}, status_code=400)
 
     wf = json.loads(WORKFLOW_JSON_PATH.read_text(encoding="utf-8"))
@@ -137,15 +127,15 @@ async def generate(payload: GenIn = Body(...)):
     try:
         prompt_id = await _submit_to_comfy(patched)
     except Exception as e:
-        await _callback_bridge_fail(payload.requestId, payload.userId, f"submit to comfy failed: {e}")
+        await _callback_bridge(payload.requestId, payload.userId, payload.platform, "FAILED", f"submit to comfy failed: {e}", payload.englishText or "")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
 
     async def _bg():
         try:
             filename, view_url = await _poll_history_for_mp4(prompt_id)
-            await _callback_bridge_success(payload.requestId, payload.userId, payload.englishText or "", filename, view_url)
+            await _callback_bridge(payload.requestId, payload.userId, payload.platform, "SUCCESS", "video generation completed", payload.englishText or "", filename, view_url)
         except Exception as e:
-            await _callback_bridge_fail(payload.requestId, payload.userId, str(e))
+            await _callback_bridge(payload.requestId, payload.userId, payload.platform, "FAILED", str(e), payload.englishText or "")
 
     asyncio.create_task(_bg())
     return JSONResponse({"ok": True, "promptId": prompt_id})
