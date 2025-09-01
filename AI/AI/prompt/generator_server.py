@@ -19,7 +19,7 @@ BRIDGE_CALLBACK_URL  = os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8001/a
 POLL_INTERVAL        = float(os.getenv("POLL_INTERVAL", "2.0"))
 
 # ===== 로컬 output 폴더 =====
-OUTPUT_DIR = r"D:\ComfyUI\ComfyUI\output"
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/output")
 
 # -------------------
 # Models

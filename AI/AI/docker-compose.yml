@@ -1,20 +1,22 @@
 version: "3.9"
 
 services:
-  generator:
+  generator_server:
     build:
-      context: ./prompt
+      context: .
       dockerfile: Dockerfile
-    command: uvicorn generator_server:app --host 0.0.0.0 --port 9001
-    ports:
-      - "19001:9001"
+    container_name: generator_server
+    restart: always
     environment:
       - COMFY_BASE_URL=http://host.docker.internal:8188
-      - WORKFLOW_JSON_PATH=/app/videotest3.json
-      - BRIDGE_CALLBACK_URL=http://bridge:8000/api/video/callback
-    extra_hosts:
-      - "host.docker.internal:172.17.0.1"
+      - WORKFLOW_YT_PATH=/app/youtube_video.json
+      - WORKFLOW_REDDIT_PATH=/app/reddit_image.json
+      - BRIDGE_CALLBACK_URL=http://host.docker.internal:8001/api/video/callback
+      - POLL_INTERVAL=2.0
+      - OUTPUT_DIR=/app/output   # 컨테이너 안에서 output 폴더 경로
     volumes:
-      - ./prompt/videotest3.json:/app/videotest3.json
-    restart: unless-stopped
-
+      - ./youtube_video.json:/app/youtube_video.json
+      - ./reddit_image.json:/app/reddit_image.json
+      - D:/ComfyUI/ComfyUI/output:/app/output   # 로컬 output 폴더 공유
+    ports:
+      - "9001:9001"
