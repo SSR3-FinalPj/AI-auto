@@ -143,7 +143,7 @@
       "condition": "always",
       "multiple_of": 0,
       "image": [
-        "81",
+        "98",
         0
       ]
     },
@@ -156,7 +156,7 @@
     "inputs": {
       "base_resolution": 640,
       "image": [
-        "81",
+        "98",
         0
       ]
     },
@@ -180,7 +180,7 @@
   },
   "70": {
     "inputs": {
-      "steps": 15,
+      "steps": 30,
       "use_teacache": true,
       "teacache_rel_l1_thresh": 0.15000000000000002,
       "cfg": 1.0000000000000002,
@@ -222,7 +222,7 @@
     "inputs": {
       "text": "[0s-5s When raining the sky, you can see the darkness background] ",
       "negative_text": "",
-      "total_second_length": 4,
+      "total_second_length": 8,
       "latent_window_size": 9,
       "prompt_blend_sections": 0,
       "clip": [
@@ -248,14 +248,148 @@
       "title": "Save Video Files to S3"
     }
   },
-  "81": {
+  "86": {
     "inputs": {
-      "image": "2loras_test__00022_.png [output]",
-      "refresh": "refresh"
+      "ckpt_name": "dreamshaper_8.safetensors"
     },
-    "class_type": "LoadImageOutput",
+    "class_type": "CheckpointLoaderSimple",
     "_meta": {
-      "title": "이미지 로드 (출력에서)"
+      "title": "체크포인트 로드"
+    }
+  },
+  "87": {
+    "inputs": {
+      "lora_name": "blindbox_v1_mix.safetensors",
+      "strength_model": 0.7500000000000001,
+      "strength_clip": 1,
+      "model": [
+        "86",
+        0
+      ],
+      "clip": [
+        "86",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "LoRA 로드"
+    }
+  },
+  "88": {
+    "inputs": {
+      "lora_name": "MoXinV1.safetensors",
+      "strength_model": 0.5000000000000001,
+      "strength_clip": 1,
+      "model": [
+        "87",
+        0
+      ],
+      "clip": [
+        "87",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "LoRA 로드"
+    }
+  },
+  "89": {
+    "inputs": {
+      "image": ""
+    },
+    "class_type": "LoadImageS3",
+    "_meta": {
+      "title": "Load Image from S3"
+    }
+  },
+  "92": {
+    "inputs": {
+      "pixels": [
+        "89",
+        0
+      ],
+      "vae": [
+        "86",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE 인코드"
+    }
+  },
+  "95": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "88",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP 텍스트 인코딩 (프롬프트)"
+    }
+  },
+  "96": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "88",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP 텍스트 인코딩 (프롬프트)"
+    }
+  },
+  "97": {
+    "inputs": {
+      "seed": 462255645738926,
+      "steps": 30,
+      "cfg": 7,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.7500000000000001,
+      "model": [
+        "88",
+        0
+      ],
+      "positive": [
+        "95",
+        0
+      ],
+      "negative": [
+        "96",
+        0
+      ],
+      "latent_image": [
+        "92",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "98": {
+    "inputs": {
+      "samples": [
+        "97",
+        0
+      ],
+      "vae": [
+        "86",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE 디코드"
     }
   }
 }
