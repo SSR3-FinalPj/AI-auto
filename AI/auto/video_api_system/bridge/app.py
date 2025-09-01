@@ -10,6 +10,7 @@ from confluent_kafka import Producer
 from contextlib import asynccontextmanager
 from llm_client import summarize_to_english, summarize_top3_text
 from dotenv import load_dotenv
+from models import Weather, BridgeIn, Envelope
 load_dotenv()
 
 # -------------------
@@ -37,38 +38,6 @@ producer_conf = {
     "socket.timeout.ms": 30000,
 }
 producer = Producer(producer_conf)
-
-# -------------------
-# Models
-# -------------------
-class Weather(BaseModel):
-    areaName: str
-    temperature: str
-    humidity: str
-    uvIndex: str
-    congestionLevel: str
-    maleRate: str
-    femaleRate: str
-    teenRate: str
-    twentyRate: str
-    thirtyRate: str
-    fortyRate: str
-    fiftyRate: str
-    sixtyRate: str
-    seventyRate: str
-
-class BridgeIn(BaseModel):
-    img: str
-    jobId: str
-    platform: str
-    isclient: bool = False
-    weather: Weather
-    user: Optional[Dict[str, Any]] = None
-
-class Envelope(BaseModel):
-    youtube: Optional[Dict[str, Any]] = None
-    reddit: Optional[Dict[str, Any]]  = None
-    topic: Optional[str] = None 
 
 # -------------------
 # State
@@ -165,6 +134,7 @@ def worker_loop():
                 gen_body = {
                     "requestId": req_id,
                     "jobId": job["jobId"],
+                    "platform": job.get("platform"),
                     "img": job.get("img"),
                     "isclient": job.get("isclient"),
                     "englishText": english_text,
@@ -253,6 +223,7 @@ app = FastAPI(title="Bridge Server", lifespan=lifespan)
 # -------------------
 # Endpoints
 # -------------------
+#비디오 & 이미지 생성 api 
 @app.post("/api/generate-video")
 def enqueue_generate_video(
     payload: BridgeIn,
@@ -280,6 +251,7 @@ def enqueue_generate_video(
     job_queue.put(job)
     return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
 
+#비디오 & 이미지 콜백 api
 @app.post("/api/video/callback")
 async def generator_callback(request: Request):
     raw = await request.body()
@@ -309,7 +281,7 @@ async def generator_callback(request: Request):
         "imageKey": cb.get("imageKey") or info["payload"].get("img"),
         "jobId": int(cb.get("jobId")),
         "prompt": cb.get("prompt") or info.get("englishText"),
-        "type": cb.get("type") or info.get("platform"),
+        "type": info["payload"].get("platform"),
         # videoKey: 성공일 때만, 실패면 None
         "resultKey": cb.get("resultKey") if cb.get("status") == "SUCCESS" else None,
         "status": cb.get("status") or "FAILED",
@@ -324,6 +296,7 @@ async def generator_callback(request: Request):
 
     return JSONResponse({"ok": True, "late": False})
 
+#queue 상태 확인 
 @app.get("/queue/stats")
 def stats():
     with lock:
@@ -337,6 +310,7 @@ def stats():
 def health():
     return {"ok": True}
 
+#댓글 분석 api 
 @app.post("/api/comments")
 def comments_top3(envelope: Envelope):
     if not envelope.youtube and not envelope.reddit:
