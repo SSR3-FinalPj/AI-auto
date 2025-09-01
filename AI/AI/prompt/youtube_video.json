@@ -46,15 +46,6 @@
       "title": "CLIP_VISION 로드"
     }
   },
-  "19": {
-    "inputs": {
-      "image": "palace.jpg"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image: Start"
-    }
-  },
   "20": {
     "inputs": {
       "pixels": [
@@ -75,11 +66,11 @@
     "inputs": {
       "frame_rate": 30,
       "loop_count": 0,
-      "filename_prefix": "AnimateDiff",
+      "filename_prefix": "Youtube",
       "format": "video/h264-mp4",
       "pix_fmt": "yuv420p",
       "crf": 19,
-      "save_metadata": true,
+      "save_metadata": false,
       "trim_to_audio": false,
       "pingpong": false,
       "save_output": true,
@@ -91,21 +82,6 @@
     "class_type": "VHS_VideoCombine",
     "_meta": {
       "title": "Video Combine 🎥🅥🅗🅢"
-    }
-  },
-  "27": {
-    "inputs": {
-      "backend": "inductor",
-      "fullgraph": false,
-      "mode": "default",
-      "dynamic": false,
-      "dynamo_cache_size_limit": 64,
-      "compile_single_blocks": true,
-      "compile_double_blocks": true
-    },
-    "class_type": "FramePackTorchCompileSettings",
-    "_meta": {
-      "title": "Torch Compile Settings"
     }
   },
   "33": {
@@ -167,7 +143,7 @@
       "condition": "always",
       "multiple_of": 0,
       "image": [
-        "72",
+        "81",
         0
       ]
     },
@@ -180,7 +156,7 @@
     "inputs": {
       "base_resolution": 640,
       "image": [
-        "72",
+        "81",
         0
       ]
     },
@@ -206,9 +182,9 @@
     "inputs": {
       "steps": 15,
       "use_teacache": true,
-      "teacache_rel_l1_thresh": 0.15,
-      "cfg": 1,
-      "guidance_scale": 10,
+      "teacache_rel_l1_thresh": 0.15000000000000002,
+      "cfg": 1.0000000000000002,
+      "guidance_scale": 10.000000000000002,
       "shift": 0,
       "seed": 1113888905790971,
       "gpu_memory_preservation": 6,
@@ -246,7 +222,7 @@
     "inputs": {
       "text": "[0s-5s When raining the sky, you can see the darkness background] ",
       "negative_text": "",
-      "total_second_length": 1,
+      "total_second_length": 4,
       "latent_window_size": 9,
       "prompt_blend_sections": 0,
       "clip": [
@@ -259,18 +235,9 @@
       "title": "FramePack Text Encode (Enhanced)"
     }
   },
-  "72": {
-    "inputs": {
-      "image": "02b4a28d-93a1-41e8-96ce-321623054aee.jpg"
-    },
-    "class_type": "LoadImageS3",
-    "_meta": {
-      "title": "Load Image from S3"
-    }
-  },
   "74": {
     "inputs": {
-      "filename_prefix": "example",
+      "filename_prefix": "Youtube",
       "filenames": [
         "23",
         0
@@ -279,6 +246,16 @@
     "class_type": "SaveVideoFilesS3",
     "_meta": {
       "title": "Save Video Files to S3"
+    }
+  },
+  "81": {
+    "inputs": {
+      "image": "2loras_test__00022_.png [output]",
+      "refresh": "refresh"
+    },
+    "class_type": "LoadImageOutput",
+    "_meta": {
+      "title": "이미지 로드 (출력에서)"
     }
   }
 }
