@@ -46,15 +46,6 @@
       "title": "CLIP_VISION 로드"
     }
   },
-  "19": {
-    "inputs": {
-      "image": "palace.jpg"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image: Start"
-    }
-  },
   "20": {
     "inputs": {
       "pixels": [
@@ -75,11 +66,11 @@
     "inputs": {
       "frame_rate": 30,
       "loop_count": 0,
-      "filename_prefix": "AnimateDiff",
+      "filename_prefix": "Youtube",
       "format": "video/h264-mp4",
       "pix_fmt": "yuv420p",
       "crf": 19,
-      "save_metadata": true,
+      "save_metadata": false,
       "trim_to_audio": false,
       "pingpong": false,
       "save_output": true,
@@ -91,21 +82,6 @@
     "class_type": "VHS_VideoCombine",
     "_meta": {
       "title": "Video Combine 🎥🅥🅗🅢"
-    }
-  },
-  "27": {
-    "inputs": {
-      "backend": "inductor",
-      "fullgraph": false,
-      "mode": "default",
-      "dynamic": false,
-      "dynamo_cache_size_limit": 64,
-      "compile_single_blocks": true,
-      "compile_double_blocks": true
-    },
-    "class_type": "FramePackTorchCompileSettings",
-    "_meta": {
-      "title": "Torch Compile Settings"
     }
   },
   "33": {
@@ -167,7 +143,7 @@
       "condition": "always",
       "multiple_of": 0,
       "image": [
-        "72",
+        "98",
         0
       ]
     },
@@ -180,7 +156,7 @@
     "inputs": {
       "base_resolution": 640,
       "image": [
-        "72",
+        "98",
         0
       ]
     },
@@ -204,11 +180,11 @@
   },
   "70": {
     "inputs": {
-      "steps": 15,
+      "steps": 30,
       "use_teacache": true,
-      "teacache_rel_l1_thresh": 0.15,
-      "cfg": 1,
-      "guidance_scale": 10,
+      "teacache_rel_l1_thresh": 0.15000000000000002,
+      "cfg": 1.0000000000000002,
+      "guidance_scale": 10.000000000000002,
       "shift": 0,
       "seed": 1113888905790971,
       "gpu_memory_preservation": 6,
@@ -246,7 +222,7 @@
     "inputs": {
       "text": "[0s-5s When raining the sky, you can see the darkness background] ",
       "negative_text": "",
-      "total_second_length": 1,
+      "total_second_length": 8,
       "latent_window_size": 9,
       "prompt_blend_sections": 0,
       "clip": [
@@ -259,18 +235,9 @@
       "title": "FramePack Text Encode (Enhanced)"
     }
   },
-  "72": {
-    "inputs": {
-      "image": "0efb7aba-7dc9-4caa-a753-d6087a6c930a.jpg"
-    },
-    "class_type": "LoadImageS3",
-    "_meta": {
-      "title": "Load Image from S3"
-    }
-  },
   "74": {
     "inputs": {
-      "filename_prefix": "example",
+      "filename_prefix": "Youtube",
       "filenames": [
         "23",
         0
@@ -279,6 +246,150 @@
     "class_type": "SaveVideoFilesS3",
     "_meta": {
       "title": "Save Video Files to S3"
+    }
+  },
+  "86": {
+    "inputs": {
+      "ckpt_name": "dreamshaper_8.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "체크포인트 로드"
+    }
+  },
+  "87": {
+    "inputs": {
+      "lora_name": "blindbox_v1_mix.safetensors",
+      "strength_model": 0.7500000000000001,
+      "strength_clip": 1,
+      "model": [
+        "86",
+        0
+      ],
+      "clip": [
+        "86",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "LoRA 로드"
+    }
+  },
+  "88": {
+    "inputs": {
+      "lora_name": "MoXinV1.safetensors",
+      "strength_model": 0.5000000000000001,
+      "strength_clip": 1,
+      "model": [
+        "87",
+        0
+      ],
+      "clip": [
+        "87",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "LoRA 로드"
+    }
+  },
+  "89": {
+    "inputs": {
+      "image": ""
+    },
+    "class_type": "LoadImageS3",
+    "_meta": {
+      "title": "Load Image from S3"
+    }
+  },
+  "92": {
+    "inputs": {
+      "pixels": [
+        "89",
+        0
+      ],
+      "vae": [
+        "86",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE 인코드"
+    }
+  },
+  "95": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "88",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP 텍스트 인코딩 (프롬프트)"
+    }
+  },
+  "96": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "88",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP 텍스트 인코딩 (프롬프트)"
+    }
+  },
+  "97": {
+    "inputs": {
+      "seed": 462255645738926,
+      "steps": 30,
+      "cfg": 7,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.7500000000000001,
+      "model": [
+        "88",
+        0
+      ],
+      "positive": [
+        "95",
+        0
+      ],
+      "negative": [
+        "96",
+        0
+      ],
+      "latent_image": [
+        "92",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "98": {
+    "inputs": {
+      "samples": [
+        "97",
+        0
+      ],
+      "vae": [
+        "86",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE 디코드"
     }
   }
 }
