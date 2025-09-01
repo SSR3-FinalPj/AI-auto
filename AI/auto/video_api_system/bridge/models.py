@@ -22,12 +22,10 @@ class Weather(BaseModel):
 
 class BridgeIn(BaseModel):
     img: str
-    userId: str
-    purpose: str
-    shutdown: bool = False
+    jobId: str
+    platform: str
+    isclient: bool = False
     weather: Weather
-    youtube: Optional[Dict[str, Any]] = None
-    reddit: Optional[Dict[str, Any]] = None
     user: Optional[Dict[str, Any]] = None
 
 class Envelope(BaseModel):
