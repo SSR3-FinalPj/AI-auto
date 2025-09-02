@@ -34,7 +34,7 @@ General rules:
 
 ANALYSIS = ("""
 당신은 유튜브 혹은 레딧 '댓글'을 분석하는 인사이트 분석가입니다.
-입력 items는 이미 상위 3개(top3)로 정제되어 있습니다. 순서를 바꾸지 말고 그대로 사용하세요.
+입력 items는 상위 1-3개(top1-3)로 정제되어 있습니다. 순서를 바꾸지 말고 그대로 사용하세요.
 허위 추론 금지, 불확실하면 언급하지 마세요. 한국어로 답변합니다.
 
 items: [
@@ -45,7 +45,7 @@ context: { "topic":"string|null" }
 
 [출력 형식 — 반드시 이 JSON만 반환]
 {
-  "top3": [
+  "top comments": [
     {
       "rank": "1",
       "platform": "youtube|reddit",
@@ -54,22 +54,7 @@ context: { "topic":"string|null" }
       "likes_or_score": "number_as_string",
       "replies": "number_as_string"
     },
-    {
-      "rank": "2",
-      "platform": "youtube|reddit",
-      "author": "string|null",
-      "text": "string",
-      "likes_or_score": "number_as_string",
-      "replies": "number_as_string"
-    },
-    {
-      "rank": "3",
-      "platform": "youtube|reddit",
-      "author": "string|null",
-      "text": "string",
-      "likes_or_score": "number_as_string",
-      "replies": "number_as_string"
-    }
+    ...
   ],
   "atmosphere": "분위기 해석을 최대 2문장으로 한국어로 서술합니다. 주요 근거는 내용만 요약하고 author는 언급하지 않습니다."
 }
@@ -196,8 +181,8 @@ def summarize_top3_text(envelope: dict) -> str:
     def _force_str(x):
         return "" if x is None else str(x)
 
-    if isinstance(data.get("top3"), list):
-        for it in data["top3"]:
+    if isinstance(data.get("top"), list):
+        for it in data["top"]:
             if isinstance(it, dict):
                 it["rank"] = _force_str(it.get("rank"))
                 it["likes_or_score"] = _force_str(it.get("likes_or_score"))
