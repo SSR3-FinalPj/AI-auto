@@ -1,6 +1,7 @@
 import os, json, time, hmac, hashlib, threading, queue, uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict
+from queue import PriorityQueue
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -42,7 +43,7 @@ producer = Producer(producer_conf)
 # -------------------
 # State
 # -------------------
-job_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+job_queue: "PriorityQueue[tuple[int, dict]]" = PriorityQueue()
 inflight: Dict[str, Dict[str, Any]] = {}
 idemp_index: Dict[str, str] = {}
 completed: set[str] = set()
@@ -94,8 +95,8 @@ def produce_kafka(event_key: str, value: dict):
 def worker_loop():
     print("Worker thread started!")
     while True:
-        job = job_queue.get()
-        print(f"[Worker] Dequeued job {job['requestId']} for user {job['jobId']}")
+        prio, job = job_queue.get()
+        print(f"[Worker] (prio={prio}) Dequeued job {job['requestId']} for user {job['jobId']}")
         attempts = job.get("_attempts", 0)
         req_id = job["requestId"]
 
@@ -130,29 +131,37 @@ def worker_loop():
                     inflight[req_id]["englishText"] = english_text
                 log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
 
-            with httpx.Client(timeout=10) as cli:
-                gen_body = {
-                    "requestId": req_id,
-                    "jobId": job["jobId"],
-                    "platform": job.get("platform"),
-                    "img": job.get("img"),
-                    "isclient": job.get("isclient"),
-                    "englishText": english_text,
-                }
-                if not GENERATOR_ENDPOINT:
-                    raise RuntimeError("GENERATOR_ENDPOINT is not set")
-                try:
-                    r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
-                    r.raise_for_status()
-                except Exception as ge:
-                    print(f"[GEN_POST_FAIL][{req_id}] {ge}")
-                    raise
+            # 2) 제너레이터 호출 (짧은 read 타임아웃 추천)
+            if not GENERATOR_ENDPOINT:
+                raise RuntimeError("GENERATOR_ENDPOINT is not set")
 
-            if SERIALIZE_BY_CALLBACK:
-                ok = done_evt.wait(timeout=TTL_SECONDS)
-                if not ok:
-                    with lock:
-                        inflight.pop(req_id, None)
+            to = httpx.Timeout(connect=3, read=8, write=10, pool=5)
+            gen_body = {
+                "requestId": req_id,
+                "jobId": job["jobId"],
+                "platform": job.get("platform"),
+                "img": job.get("img"),
+                "isclient": job.get("isclient"),
+                "englishText": english_text,
+            }
+
+            try:
+                with httpx.Client(timeout=to) as cli:
+                    r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
+                    if r.status_code not in (200, 201, 202):
+                        raise RuntimeError(f"GEN status={r.status_code} body={r.text[:200]}")
+            except httpx.ConnectError as ce:
+                print(f"[GEN_CONNECT_FAIL][{req_id}] {ce}")
+                raise
+            except httpx.ConnectTimeout as cte:
+                print(f"[GEN_CONNECT_TIMEOUT][{req_id}] {cte}")
+                raise
+            except httpx.ReadTimeout as rte:
+                print(f"[GEN_READ_TIMEOUT][{req_id}] {rte} (proceeding; will await callback or TTL)")
+                # 수락되었을 가능성이 있으니 재시도하지 않음
+            except Exception as ge:
+                print(f"[GEN_POST_FAIL][{req_id}] {ge}")
+                raise
 
         except Exception as e:
             attempts += 1
@@ -162,7 +171,7 @@ def worker_loop():
                 sleep_s = min(2 ** attempts, 30) + (hash(req_id) % 1000)/1000.0
                 time.sleep(sleep_s)
                 job["_attempts"] = attempts
-                job_queue.put(job)
+                job_queue.put((prio, job))
             else:
                 event = {
                     "eventId": f"evt_{req_id}_bridge_fail",
@@ -242,77 +251,23 @@ def enqueue_generate_video(
     with lock:
         if derived_key in idemp_index:
             req_id = idemp_index[derived_key]
-            return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": True})
+            return JSONResponse(
+                {"requestId": req_id, "enqueued": True, "deduplicated": True},
+                status_code=202
+                )
         req_id = make_id()
         idemp_index[derived_key] = req_id
 
     job = {**data, "requestId": req_id, "_enqueuedAt": now_utc().isoformat()}
+    prio = 0 if bool(job.get("isclient")) else 1
+    # 우선순위 큐에 (prio, job)로 넣기
+    job_queue.put((prio, job))
 
-    # ✅ isclient=true → direct 처리 (LLM + inflight + generator_server 호출)
-    if job.get("isclient"):
-        print(f"[DIRECT] isclient=True, generator_server 직접 호출")
-
-        done_evt = threading.Event()
-        try:
-            with lock:
-                inflight[req_id] = {
-                    "jobId": job["jobId"],
-                    "payload": job,
-                    "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
-                    "enqueuedAt": job["_enqueuedAt"],
-                    "doneEvt": done_evt,
-                }
-
-            try:
-                english_text = summarize_to_english(job)
-                job["_englishText"] = english_text
-                with lock:
-                    inflight[req_id]["englishText"] = english_text
-                log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
-            except Exception as e:
-                w = job.get("weather", {})
-                english_text = (
-                    f"{w.get('areaName','Unknown area')}: "
-                    f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
-                    f"UV {w.get('uvIndex','?')}."
-                )
-                job["_englishText"] = english_text
-                with lock:
-                    inflight[req_id]["englishText"] = english_text
-                log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
-
-            with httpx.Client(timeout=10) as cli:
-                gen_body = {
-                    "requestId": req_id,
-                    "jobId": job["jobId"],
-                    "platform": job.get("platform"),
-                    "img": job.get("img"),
-                    "isclient": True,
-                    "englishText": job["_englishText"],
-                }
-                if not GENERATOR_ENDPOINT:
-                    raise RuntimeError("GENERATOR_ENDPOINT is not set")
-                r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
-                r.raise_for_status()
-
-            if SERIALIZE_BY_CALLBACK:
-                ok = done_evt.wait(timeout=TTL_SECONDS)
-                if not ok:
-                    with lock:
-                        inflight.pop(req_id, None)
-
-            return JSONResponse({"requestId": req_id, "enqueued": False, "direct": True}, status_code=202)
-
-        except Exception as e:
-            with lock:
-                inflight.pop(req_id, None)
-            print(f"[DIRECT_FAIL][{req_id}] {e}")
-            raise HTTPException(502, f"direct call to generator failed: {e}")
-
-    # ✅ isclient=false → 기존 큐 처리
-    else:
-        job_queue.put(job)
-        return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
+    # 즉시 202
+    return JSONResponse(
+        {"requestId": req_id, "enqueued": True, "deduplicated": False, "priority": prio},
+        status_code=202
+    )
 
 @app.post("/api/video/callback")
 async def generator_callback(request: Request):
