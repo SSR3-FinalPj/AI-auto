@@ -26,7 +26,7 @@ class BridgeIn(BaseModel):
     platform: str
     isclient: bool = False
     weather: Weather
-    user: Optional[Dict[str, Any]] = None
+    user: Optional[str] = None
 
 class Envelope(BaseModel):
     youtube: Optional[Dict[str, Any]] = None

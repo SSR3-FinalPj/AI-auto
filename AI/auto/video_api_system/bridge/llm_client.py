@@ -22,7 +22,7 @@ Each sentence should be 15–25 words. No lists, emojis, or hashtags.
 
 User Notes (only if data exists):
 - Write up to 2 additional sentences. Each sentence must be 15–25 words. No lists, emojis, or hashtags.
-1) Faithfully reflect the user's notes or preferences; preserve key phrases; no hallucinations.
+1) Faithfully reflect the user; preserve key phrases; no hallucinations.
 2) Provide one actionable suggestion tailored to those notes.
 
 General rules:
@@ -77,23 +77,14 @@ def _get_api_key() -> str:
 def _model_name() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-#표준화 
-def _normalize_social(payload: Dict[str, Any]) -> Dict[str, Any]:
-    u = ((payload.get("user")    or {}).get("additionalProp1") or {}).copy()
-
-    # User 노트
-    user_notes = u.get("notes") or u.get("note")
-
-    return {"user_notes": user_notes}
-
 #프롬프트 생성 함수 
 def _build_user_prompt(payload: Dict[str, Any]) -> str:
     w = payload.get("weather") or {}
-    social = _normalize_social(payload)
+    u = payload.get("user") or {}
 
     json_payload = {
         "weather": w,
-        "user":    {"notes": social["user_notes"]} if social["user_notes"] else None
+        "user":    u
     }
 
     # SYSTEM에 이미 전체 지시가 있음
