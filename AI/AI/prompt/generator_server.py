@@ -26,16 +26,16 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/output")
 # -------------------
 class GenIn(BaseModel):
     requestId: str
-    jobId: str
+    jobId: int
     img: str
     englishText: Optional[str] = ""
     platform: str   # youtube | reddit
+    isclient: Optional[bool] = False   # ✅ 확인할 대상
 
 # -------------------
 # Utils
 # -------------------
 async def _submit_to_comfy(patched_workflow: Dict[str, Any]) -> str:
-    """ComfyUI 워크플로우 제출"""
     client_id = uuid.uuid4().hex
     payload = {"client_id": client_id, "prompt": patched_workflow}
     async with httpx.AsyncClient(timeout=300) as cli:
@@ -48,7 +48,6 @@ async def _submit_to_comfy(patched_workflow: Dict[str, Any]) -> str:
     return pid
 
 async def _wait_for_history_and_get_output(prompt_id: str, ext: str, timeout: int, start_time: datetime) -> Optional[str]:
-    """History API에서 status=success 확인 후 start_time 이후 생성된 실제 파일만 인정"""
     deadline = asyncio.get_event_loop().time() + timeout
     async with httpx.AsyncClient(timeout=30) as cli:
         while asyncio.get_event_loop().time() < deadline:
@@ -91,31 +90,49 @@ async def _callback_bridge(payload: GenIn,
         "type": payload.platform,
         "createdAt": datetime.now().isoformat()
     }
+    print(f"[DEBUG] 콜백 전송 준비: {cb}")
     async with httpx.AsyncClient(timeout=30) as cli:
         try:
-            await cli.post(BRIDGE_CALLBACK_URL, json=cb)
+            r = await cli.post(BRIDGE_CALLBACK_URL, json=cb)
+            print("[DEBUG] 콜백 응답:", r.status_code, r.text)
         except Exception as e:
             print(f"[ERROR] Callback 전송 실패: {e}")
+
+async def _interrupt_comfy():
+    async with httpx.AsyncClient(timeout=30) as cli:
+        try:
+            r = await cli.post(f"{COMFY_BASE_URL}/interrupt")
+            print("[DEBUG] interrupt response:", r.status_code, r.text)
+            r.raise_for_status()
+            print("[INFO] 실행중인 ComfyUI 워크플로우 중단됨")
+        except Exception as e:
+            print(f"[ERROR] ComfyUI interrupt 실패: {e}")
 
 # -------------------
 # FastAPI
 # -------------------
-app = FastAPI(title="Generator Server (History API + file check strict)")
+app = FastAPI(title="Generator Server (Debugging)")
 
 @app.post("/generate")
 async def generate(payload: GenIn = Body(...)):
-    if not payload.requestId:
-        raise HTTPException(400, "requestId 누락")
+    print("[DEBUG] 요청 수신:", payload.dict())
 
-    # 플랫폼별 워크플로 선택 & 확장자/타임아웃 설정
+    if payload.isclient:
+        print("[DEBUG] isclient=True, interrupt 호출 시도")
+        await _interrupt_comfy()
+        await _callback_bridge(payload, "FAILED", "interrupted by client")
+        await asyncio.sleep(5.0)
+    else:
+        print("[DEBUG] isclient=False, 그냥 실행")
+
     if payload.platform == "youtube":
         wf_path = WORKFLOW_YT_PATH
         ext = ".mp4"
-        poll_timeout = 3600  # 1시간
+        poll_timeout = 3600
     elif payload.platform == "reddit":
         wf_path = WORKFLOW_REDDIT_PATH
         ext = ".png"
-        poll_timeout = 300   # 5분
+        poll_timeout = 300
     else:
         await _callback_bridge(payload, "FAILED", f"unsupported platform: {payload.platform}")
         return JSONResponse({"ok": False, "error": "unsupported platform"}, status_code=400)
@@ -127,7 +144,6 @@ async def generate(payload: GenIn = Body(...)):
         await _callback_bridge(payload, "FAILED", "img 누락")
         return JSONResponse({"ok": False, "error": "img missing"}, status_code=400)
 
-    # 워크플로 수정
     wf = json.loads(wf_path.read_text(encoding="utf-8"))
 
     if payload.platform == "youtube":
@@ -157,18 +173,15 @@ async def generate(payload: GenIn = Body(...)):
             wf["7"]["inputs"]["text"] = ""
 
     patched = wf
-
-    # ComfyUI에 제출 직전 시간 기록
     start_time = datetime.now()
 
-    # ComfyUI에 제출
     try:
         prompt_id = await _submit_to_comfy(patched)
+        print("[DEBUG] 새 워크플로우 제출, prompt_id:", prompt_id)
     except Exception as e:
         await _callback_bridge(payload, "FAILED", f"submit to comfy failed: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
 
-    # 비동기 후처리
     async def _bg():
         try:
             result_key = await _wait_for_history_and_get_output(prompt_id, ext, poll_timeout, start_time)
