@@ -19,4 +19,4 @@ services:
       - ./reddit_image.json:/app/reddit_image.json
       - D:/ComfyUI/ComfyUI/output:/app/output   # 로컬 output 폴더 공유
     ports:
-      - "9001:9001"
+      - "19001:9001"

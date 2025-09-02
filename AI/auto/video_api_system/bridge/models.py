@@ -22,7 +22,7 @@ class Weather(BaseModel):
 
 class BridgeIn(BaseModel):
     img: str
-    jobId: str
+    jobId: int
     platform: str
     isclient: bool = False
     weather: Weather
