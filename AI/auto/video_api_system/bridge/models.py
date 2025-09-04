@@ -29,6 +29,4 @@ class BridgeIn(BaseModel):
     user: Optional[str] = None
 
 class Envelope(BaseModel):
-    youtube: Optional[Dict[str, Any]] = None
-    reddit: Optional[Dict[str, Any]]  = None
-    topic: Optional[str] = None 
+    topic: Dict[str, Any] = None 

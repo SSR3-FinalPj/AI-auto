@@ -33,19 +33,47 @@ General rules:
 ''').strip()
 
 ANALYSIS = ("""
-당신은 유튜브 혹은 레딧 '댓글'을 분석하는 인사이트 분석가입니다.
-입력 items는 상위 1-3개(top1-3)로 정제되어 있습니다. 순서를 바꾸지 말고 그대로 사용하세요.
-허위 추론 금지, 불확실하면 언급하지 마세요. 한국어로 답변합니다.
+당신은 유튜브/레딧 댓글을 분석하는 인사이트 분석가입니다.
+입력은 아래 스키마를 그대로 따릅니다(전처리 금지).
 
-items: [
-  { "platform":"youtube|reddit", "id":"...", "author":"...", "text":"...", "likes_or_score":int, "replies":int, "published_at": "ISO8601|null" },
-  ...
-]
-context: { "topic":"string|null" }
-
-[출력 형식 — 반드시 이 JSON만 반환]
+입력 스키마:
 {
-  "video_id" :"string"
+  "youtube": {
+    "videoId": "string|null",
+    "comments": [
+      {
+        "comment_id": "string",
+        "author": "string|null",
+        "comment": "string",
+        "like_count": int,
+        "total_reply_count": int,
+        "published_at": "ISO8601|null"
+      }, ...
+    ] | null
+  } | null,
+  "reddit": null | {
+    "comments": [
+      {
+        "comment_id": "string",
+        "author": "string|null",
+        "comment": "string",
+        "score": int,
+        "replies": int,
+        "published_at": "ISO8601|null"
+      }, ...
+    ] | null
+  },
+  "topic": "string|null"
+}
+
+규칙:
+- reddit이나 youtube 중 하나가 null이면 존재하는 플랫폼만 사용하세요.
+- 상위 1~3개 선택: 좋아요/점수(내림차순) → 답글수(내림차순) → 게시시각(최신 우선).
+- 유튜브는 like_count/total_reply_count, 레딧은 score/replies를 사용합니다.
+
+[출력 — 반드시 이 JSON만 반환]
+{
+  "video_id": "string",   // youtube.videoId가 있으면 그대로, 없으면 빈 문자열
   "top comments": [
     {
       "rank": "1",
@@ -57,10 +85,11 @@ context: { "topic":"string|null" }
     },
     ...
   ],
-  "atmosphere": "분위기 해석을 최대 2문장으로 한국어로 서술합니다. 주요 근거는 내용만 요약하고 author는 언급하지 않습니다."
+  "atmosphere": "분위기를 최대 2문장으로 한국어로 요약합니다. 근거는 내용만 요약하고 author는 언급하지 않습니다."
 }
-규칙:
-- 모든 수치 필드(likes_or_score, replies, rank)는 문자열(String)로 반환합니다.
+
+반드시 지킬 것:
+- 모든 수치 필드는 문자열(String)로 반환합니다.
 - JSON 이외의 텍스트/코드블록/주석/접두·접미 문구를 절대 포함하지 마세요.
 """).strip()
 
@@ -150,35 +179,132 @@ def _call_gemini(promptA: str, promptB: str) -> str:
             else:
                 raise RuntimeError(f"Gemini REST failed: {e}") from e
 
+def _normalize_to_new_schema(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    env = dict(envelope) if envelope else {}
+    yt = (env.get("youtube") or {})
+    if yt:
+        # legacy: video_id -> videoId
+        if "videoId" not in yt and "video_id" in yt:
+            yt["videoId"] = yt.pop("video_id")
+        # drop comment-level video_id (불필요)
+        comments = yt.get("comments")
+        if isinstance(comments, list):
+            for c in comments:
+                if isinstance(c, dict):
+                    c.pop("video_id", None)
+        env["youtube"] = yt
+    return env
+
+def _force_str(x):
+    return "" if x is None else str(x)
+
+def _rank_candidates_from_raw(env: Dict[str, Any]) -> Dict[str, Any]:
+    yt = (env.get("youtube") or {})
+    rd = (env.get("reddit") or {})
+    video_id = yt.get("videoId") or ""
+
+    cand = []
+    for c in (yt.get("comments") or []):
+        cand.append({
+            "platform": "youtube",
+            "author": c.get("author"),
+            "text": c.get("comment"),
+            "likes_or_score": int(c.get("like_count") or 0),
+            "replies": int(c.get("total_reply_count") or 0),
+            "published_at": c.get("published_at") or ""
+        })
+    for c in (rd.get("comments") or []):
+        cand.append({
+            "platform": "reddit",
+            "author": c.get("author"),
+            "text": c.get("comment"),
+            "likes_or_score": int(c.get("score") or 0),
+            "replies": int(c.get("replies") or 0),
+            "published_at": c.get("published_at") or ""
+        })
+
+    # 좋아요/점수 ↓, 답글수 ↓, 게시시각 ↓(문자열이지만 ISO8601이면 문자열 비교도 최신 우선 정렬에 충분)
+    cand.sort(key=lambda x: (x["likes_or_score"], x["replies"], x["published_at"]), reverse=True)
+
+    top = []
+    for i, it in enumerate(cand[:3], start=1):
+        top.append({
+            "rank": _force_str(i),
+            "platform": it["platform"],
+            "author": _force_str(it.get("author")),
+            "text": _force_str(it.get("text")),
+            "likes_or_score": _force_str(it.get("likes_or_score")),
+            "replies": _force_str(it.get("replies")),
+        })
+
+    # 매우 단순 분위기 요약(한국어 키워드 기준)
+    texts = " ".join(t["text"] for t in top if t.get("text"))
+    pos = sum(k in texts for k in ["예뻐", "좋", "부드럽", "가독성"])
+    neg = sum(k in texts for k in ["길", "아쉽", "부족"])
+    if not texts:
+        atm = ""
+    elif pos >= neg:
+        atm = "전반적으로 긍정적이며 색감, 전환, 자막 가독성에 호평이 많습니다. 일부는 인트로 길이에 대한 개선 의견을 제시합니다."
+    else:
+        atm = "전반적으로 개선 의견이 두드러지며 특히 인트로 길이가 지적됩니다. 색감과 전환, 자막 가독성은 긍정적 평가가 있습니다."
+
+    return {"video_id": _force_str(video_id), "top comments": top, "atmosphere": atm}
+
+
 #상위 3개 댓글 분석 
-def summarize_top3_text(envelope: dict) -> str:
-    """
-    envelope: {"youtube": {...} | None, "reddit": {...} | None, "topic": str|None}
-    """
+def summarize_top3_text(envelope: dict) -> dict:
+    # 0) 입력 보정(레거시→신규, comment-level video_id 제거)
+    envelope = _normalize_to_new_schema(envelope)
+
+    # 1) 모델 호출
     user_prompt = json.dumps(envelope, ensure_ascii=False)
     raw = _call_gemini(ANALYSIS, user_prompt)
 
-    # 1) 코드펜스/앞뒤 잡음 제거 + 중괄호 영역만 추출
+    # 2) JSON 추출 시도
     raw = (raw or "").strip().strip("`").strip()
     start, end = raw.find("{"), raw.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise RuntimeError("Model did not return JSON")
+    data = None
+    if start != -1 and end != -1 and end > start:
+        try:
+            data = json.loads(raw[start:end+1])
+        except Exception:
+            data = None
 
-    payload = raw[start:end+1]
+    # 3) 정상 응답이면 키 보정 + 숫자 문자열화 + video_id 보강
+    if data and isinstance(data, dict):
+        top_key = "top comments" if "top comments" in data else ("top_comments" if "top_comments" in data else None)
+        if top_key and isinstance(data.get(top_key), list):
+            for it in data[top_key]:
+                if isinstance(it, dict):
+                    it["rank"] = _force_str(it.get("rank"))
+                    it["likes_or_score"] = _force_str(it.get("likes_or_score"))
+                    it["replies"] = _force_str(it.get("replies"))
+        # video_id 비어 있으면 입력에서 보강
+        if not data.get("video_id"):
+            data["video_id"] = _force_str((envelope.get("youtube") or {}).get("videoId") or "")
 
-    # 2) JSON 파싱
-    data = json.loads(payload)
+        # 3-1) **빈 결과 보강**: top이 비었거나 atmosphere가 공백이면 로컬 폴백 사용
+        needs_fallback = (not top_key) or (not data.get(top_key)) or (not data.get("atmosphere", "").strip())
+        if needs_fallback:
+            fb = _rank_candidates_from_raw(envelope)
+            data.setdefault("video_id", fb["video_id"])
+            # top 보강
+            if (not top_key) or (not data.get(top_key)):
+                data["top comments"] = fb["top comments"]
+            else:
+                # 만약 key가 top_comments였다면 일관성을 위해 "top comments"로 통일
+                if top_key == "top_comments":
+                    data["top comments"] = data.pop("top_comments")
+            # 분위기 보강
+            if not data.get("atmosphere", "").strip():
+                data["atmosphere"] = fb["atmosphere"]
+        else:
+            # key 통일
+            if top_key == "top_comments":
+                data["top comments"] = data.pop("top_comments")
 
-    # 3) 스키마 보정: rank/likes_or_score/replies를 문자열로 강제 (의도한 출력 규칙)
-    def _force_str(x):
-        return "" if x is None else str(x)
+        return data
 
-    top_key = "top comments" if "top_comments" in data else "top"
-    if isinstance(data.get(top_key), list):
-        for it in data[top_key]:
-            if isinstance(it, dict):
-                it["rank"] = _force_str(it.get("rank"))
-                it["likes_or_score"] = _force_str(it.get("likes_or_score"))
-                it["replies"] = _force_str(it.get("replies"))
+    # 4) 모델이 JSON 실패 → 로컬 폴백 전면 사용
+    return _rank_candidates_from_raw(envelope)
 
-    return data

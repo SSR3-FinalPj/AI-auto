@@ -405,8 +405,8 @@ def health():
     return {"ok": True}
 
 @app.post("/api/comments")
-def comments_top3(envelope: Envelope):
-    if not envelope.youtube and not envelope.reddit:
+def comments_top3(envelope: Dict[str, Any]):
+    if not envelope:
         raise HTTPException(400, "youtube 또는 reddit 중 최소 하나는 포함해야 합니다.")
-    data = summarize_top3_text(envelope.model_dump())
+    data = summarize_top3_text(envelope)
     return JSONResponse(content=data, status_code=200)
