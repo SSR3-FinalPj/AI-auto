@@ -336,13 +336,24 @@ async def generator_callback(request: Request):
 
     with lock:
         inflight.pop(cb.get("requestId"), None)
+        
+    cb_type = (cb.get("type") or "").lower().strip()
+    if cb_type in ("video", "image"):
+        event_type = cb_type
+    else:
+        platform = (info["payload"] or {}).get("platform")
+        event_type = (
+            "video" if platform == "youtube"
+            else "image" if platform == "reddit"
+            else (cb_type or platform)
+        )
 
     event = {
         "eventId": cb.get("eventId") or f"evt_{cb.get('requestId')}_bridge_fail",
         "imageKey": cb.get("imageKey") or info["payload"].get("img"),
         "jobId": int(cb.get("jobId")),
         "prompt": cb.get("prompt") or info.get("englishText"),
-        "type": info["payload"].get("platform"),
+        "type": event_type,
         "resultKey": cb.get("resultKey") if cb.get("status") == "SUCCESS" else None,
         "status": cb.get("status") or "FAILED",
         "message": cb.get("message") or "bridge->generator call failed after retries: ",

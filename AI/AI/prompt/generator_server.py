@@ -30,7 +30,7 @@ class GenIn(BaseModel):
     img: str
     englishText: Optional[str] = ""
     platform: str   # youtube | reddit
-    isclient: Optional[bool] = False   # ✅ 확인할 대상
+    isclient: Optional[bool] = False  
 
 # -------------------
 # Utils
@@ -78,6 +78,13 @@ async def _callback_bridge(payload: GenIn,
                            status: str,
                            message: str,
                            resultKey: str = "") -> None:
+    
+    mapped_type = (
+        "video" if payload.platform == "youtube"
+        else "image" if payload.platform == "reddit"
+        else payload.platform
+    )
+    
     cb = {
         "eventId": f"evt_{payload.requestId}_{'done' if status == 'SUCCESS' else 'failed'}",
         "imageKey": payload.img,
@@ -87,7 +94,7 @@ async def _callback_bridge(payload: GenIn,
         "resultKey": resultKey,
         "status": status,
         "message": message,
-        "type": payload.platform,
+        "type": mapped_type,
         "createdAt": datetime.now().isoformat()
     }
     print(f"[DEBUG] 콜백 전송 준비: {cb}")
