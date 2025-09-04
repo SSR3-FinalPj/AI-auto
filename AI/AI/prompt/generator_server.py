@@ -16,10 +16,12 @@ COMFY_BASE_URL       = os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188")
 WORKFLOW_YT_PATH     = Path(os.getenv("WORKFLOW_YT_PATH", "./youtube_video.json")).resolve()
 WORKFLOW_REDDIT_PATH = Path(os.getenv("WORKFLOW_REDDIT_PATH", "./reddit_image.json")).resolve()
 BRIDGE_CALLBACK_URL  = os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8001/api/video/callback")
+#BRIDGE_CALLBACK_URL  = os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8000/api/video/callback")
 POLL_INTERVAL        = float(os.getenv("POLL_INTERVAL", "2.0"))
 
-# ===== 로컬 output 폴더 =====
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/output")
+# 이미지나 비디오 생성되는 파일 (도커, 로컬)
+#OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/output")
+OUTPUT_DIR = r"D:\ComfyUI\ComfyUI\output"
 
 # -------------------
 # Models
@@ -105,15 +107,22 @@ async def _callback_bridge(payload: GenIn,
         except Exception as e:
             print(f"[ERROR] Callback 전송 실패: {e}")
 
-async def _interrupt_comfy():
+async def _interrupt_comfy() -> bool:
     async with httpx.AsyncClient(timeout=30) as cli:
         try:
             r = await cli.post(f"{COMFY_BASE_URL}/interrupt")
             print("[DEBUG] interrupt response:", r.status_code, r.text)
             r.raise_for_status()
-            print("[INFO] 실행중인 ComfyUI 워크플로우 중단됨")
+            data = r.json() if r.headers.get("content-type","").startswith("application/json") else {}
+            if data.get("interrupted"):
+                print("[INFO] 실행중인 ComfyUI 워크플로우 중단됨")
+                return True
+            else:
+                print("[INFO] 중단할 워크플로우 없음")
+                return False
         except Exception as e:
             print(f"[ERROR] ComfyUI interrupt 실패: {e}")
+            return False
 
 # -------------------
 # FastAPI
@@ -126,11 +135,12 @@ async def generate(payload: GenIn = Body(...)):
 
     if payload.isclient:
         print("[DEBUG] isclient=True, interrupt 호출 시도")
-        await _interrupt_comfy()
-        await _callback_bridge(payload, "FAILED", "interrupted by client")
-        await asyncio.sleep(5.0)
-    else:
-        print("[DEBUG] isclient=False, 그냥 실행")
+        interrupted = await _interrupt_comfy()
+        if interrupted:  # 실제 실행 중인 워크플로우가 있었다면
+            await _callback_bridge(payload, "FAILED", "interrupted by client")
+            await asyncio.sleep(2.0)
+        else:
+            print("[INFO] 실행 중인 워크플로우가 없어 interrupt 콜백 생략")
 
     if payload.platform == "youtube":
         wf_path = WORKFLOW_YT_PATH

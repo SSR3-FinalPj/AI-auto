@@ -248,7 +248,7 @@ def enqueue_generate_video(
 
     job = {**data, "requestId": req_id, "_enqueuedAt": now_utc().isoformat()}
 
-    # ✅ isclient=true → direct 처리 (LLM + inflight + generator_server 호출)
+    # isclient=true → direct 처리 (LLM + inflight + generator_server 호출)
     if job.get("isclient"):
         print(f"[DIRECT] isclient=True, generator_server 직접 호출")
 
@@ -295,11 +295,11 @@ def enqueue_generate_video(
                 r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
                 r.raise_for_status()
 
-            if SERIALIZE_BY_CALLBACK:
-                ok = done_evt.wait(timeout=TTL_SECONDS)
-                if not ok:
-                    with lock:
-                        inflight.pop(req_id, None)
+            # if SERIALIZE_BY_CALLBACK:
+            #     ok = done_evt.wait(timeout=TTL_SECONDS)
+            #     if not ok:
+            #         with lock:
+            #             inflight.pop(req_id, None)
 
             return JSONResponse({"requestId": req_id, "enqueued": False, "direct": True}, status_code=202)
 
@@ -309,7 +309,7 @@ def enqueue_generate_video(
             print(f"[DIRECT_FAIL][{req_id}] {e}")
             raise HTTPException(502, f"direct call to generator failed: {e}")
 
-    # ✅ isclient=false → 기존 큐 처리
+    # isclient=false → 기존 큐 처리
     else:
         job_queue.put(job)
         return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
@@ -329,6 +329,18 @@ async def generator_callback(request: Request):
         done_evt = info.get("doneEvt") if info else None
 
     if info is None:
+        event = {
+            "eventId": cb.get("eventId") or f"evt_{cb.get('requestId')}_late",
+            "requestId": cb.get("requestId"),
+            "jobId": cb.get("jobId"),
+            "prompt": cb.get("prompt"),
+            "type": cb.get("type") or "unknown",
+            "resultKey": cb.get("resultKey") if cb.get("status") == "SUCCESS" else None,
+            "status": cb.get("status") or "FAILED",
+            "message": cb.get("message") or "late callback",
+            "createdAt": cb.get("createdAt") or now_utc().isoformat()
+        }
+        produce_kafka(event["eventId"], event)
         return JSONResponse({"ok": True, "late": True})
 
     if done_evt:
