@@ -45,6 +45,7 @@ context: { "topic":"string|null" }
 
 [출력 형식 — 반드시 이 JSON만 반환]
 {
+  "video_id" :"string"
   "top comments": [
     {
       "rank": "1",
@@ -172,8 +173,9 @@ def summarize_top3_text(envelope: dict) -> str:
     def _force_str(x):
         return "" if x is None else str(x)
 
-    if isinstance(data.get("top"), list):
-        for it in data["top"]:
+    top_key = "top comments" if "top_comments" in data else "top"
+    if isinstance(data.get(top_key), list):
+        for it in data[top_key]:
             if isinstance(it, dict):
                 it["rank"] = _force_str(it.get("rank"))
                 it["likes_or_score"] = _force_str(it.get("likes_or_score"))
