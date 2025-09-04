@@ -52,6 +52,7 @@ ANALYSIS = ("""
     ] | null
   } | null,
   "reddit": null | {
+    "postId": "string|null",
     "comments": [
       {
         "comment_id": "string",
@@ -71,9 +72,26 @@ ANALYSIS = ("""
 - 상위 1~3개 선택: 좋아요/점수(내림차순) → 답글수(내림차순) → 게시시각(최신 우선).
 - 유튜브는 like_count/total_reply_count, 레딧은 score/replies를 사용합니다.
 
-[출력 — 반드시 이 JSON만 반환]
+[출력(youtube comment가 null이 아닐 때) — 반드시 두 JSON 중 한 JSON만 반환]
 {
   "video_id": "string",   // youtube.videoId가 있으면 그대로, 없으면 빈 문자열
+  "top comments": [
+    {
+      "rank": "1",
+      "platform": "youtube|reddit",
+      "author": "string|null",
+      "text": "string",
+      "likes_or_score": "number_as_string",
+      "replies": "number_as_string"
+    },
+    ...
+  ],
+  "atmosphere": "분위기를 최대 2문장으로 한국어로 요약합니다. 근거는 내용만 요약하고 author는 언급하지 않습니다."
+}
+            
+[출력(reddit이 null이 아닐 때) - 절대 video_id 추가 금지]         
+{
+  "postId": "string",   //reddit.postId가 있으면 postId로 수정, 없으면 빈 문자열
   "top comments": [
     {
       "rank": "1",
@@ -202,6 +220,7 @@ def _rank_candidates_from_raw(env: Dict[str, Any]) -> Dict[str, Any]:
     yt = (env.get("youtube") or {})
     rd = (env.get("reddit") or {})
     video_id = yt.get("videoId") or ""
+    post_id = rd.get("postId") or ""
 
     cand = []
     for c in (yt.get("comments") or []):
@@ -279,25 +298,22 @@ def summarize_top3_text(envelope: dict) -> dict:
                     it["rank"] = _force_str(it.get("rank"))
                     it["likes_or_score"] = _force_str(it.get("likes_or_score"))
                     it["replies"] = _force_str(it.get("replies"))
-        # video_id 비어 있으면 입력에서 보강
-        if not data.get("video_id"):
-            data["video_id"] = _force_str((envelope.get("youtube") or {}).get("videoId") or "")
 
         # 3-1) **빈 결과 보강**: top이 비었거나 atmosphere가 공백이면 로컬 폴백 사용
-        needs_fallback = (not top_key) or (not data.get(top_key)) or (not data.get("atmosphere", "").strip())
-        if needs_fallback:
-            fb = _rank_candidates_from_raw(envelope)
-            data.setdefault("video_id", fb["video_id"])
-            # top 보강
-            if (not top_key) or (not data.get(top_key)):
-                data["top comments"] = fb["top comments"]
-            else:
-                # 만약 key가 top_comments였다면 일관성을 위해 "top comments"로 통일
-                if top_key == "top_comments":
-                    data["top comments"] = data.pop("top_comments")
-            # 분위기 보강
-            if not data.get("atmosphere", "").strip():
-                data["atmosphere"] = fb["atmosphere"]
+        # needs_fallback = (not top_key) or (not data.get(top_key)) or (not data.get("atmosphere", "").strip())
+        # if needs_fallback:
+        #     fb = _rank_candidates_from_raw(envelope)
+        #     data.setdefault("video_id", fb["video_id"])
+        #     # top 보강
+        #     if (not top_key) or (not data.get(top_key)):
+        #         data["top comments"] = fb["top comments"]
+        #     else:
+        #         # 만약 key가 top_comments였다면 일관성을 위해 "top comments"로 통일
+        #         if top_key == "top_comments":
+        #             data["top comments"] = data.pop("top_comments")
+        #     # 분위기 보강
+        #     if not data.get("atmosphere", "").strip():
+        #         data["atmosphere"] = fb["atmosphere"]
         else:
             # key 통일
             if top_key == "top_comments":
