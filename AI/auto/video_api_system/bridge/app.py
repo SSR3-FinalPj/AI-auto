@@ -259,15 +259,72 @@ def enqueue_generate_video(
         idemp_index[derived_key] = req_id
 
     job = {**data, "requestId": req_id, "_enqueuedAt": now_utc().isoformat()}
-    prio = 0 if bool(job.get("isclient")) else 1
-    # 우선순위 큐에 (prio, job)로 넣기
-    job_queue.put((prio, job))
 
-    # 즉시 202
-    return JSONResponse(
-        {"requestId": req_id, "enqueued": True, "deduplicated": False, "priority": prio},
-        status_code=202
-    )
+    # isclient=true → direct 처리 (LLM + inflight + generator_server 호출)
+    if job.get("isclient"):
+        print(f"[DIRECT] isclient=True, generator_server 직접 호출")
+
+        done_evt = threading.Event()
+        try:
+            with lock:
+                inflight[req_id] = {
+                    "jobId": job["jobId"],
+                    "payload": job,
+                    "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
+                    "enqueuedAt": job["_enqueuedAt"],
+                    "doneEvt": done_evt,
+                }
+
+            try:
+                english_text = summarize_to_english(job)
+                job["_englishText"] = english_text
+                with lock:
+                    inflight[req_id]["englishText"] = english_text
+                log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
+            except Exception as e:
+                w = job.get("weather", {})
+                english_text = (
+                    f"{w.get('areaName','Unknown area')}: "
+                    f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
+                    f"UV {w.get('uvIndex','?')}."
+                )
+                job["_englishText"] = english_text
+                with lock:
+                    inflight[req_id]["englishText"] = english_text
+                log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
+
+            with httpx.Client(timeout=10) as cli:
+                gen_body = {
+                    "requestId": req_id,
+                    "jobId": job["jobId"],
+                    "platform": job.get("platform"),
+                    "img": job.get("img"),
+                    "isclient": True,
+                    "englishText": job["_englishText"],
+                }
+                if not GENERATOR_ENDPOINT:
+                    raise RuntimeError("GENERATOR_ENDPOINT is not set")
+                r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
+                r.raise_for_status()
+
+            # if SERIALIZE_BY_CALLBACK:
+            #     ok = done_evt.wait(timeout=TTL_SECONDS)
+            #     if not ok:
+            #         with lock:
+            #             inflight.pop(req_id, None)
+
+            return JSONResponse({"requestId": req_id, "enqueued": False, "direct": True}, status_code=202)
+
+        except Exception as e:
+            with lock:
+                inflight.pop(req_id, None)
+            print(f"[DIRECT_FAIL][{req_id}] {e}")
+            raise HTTPException(502, f"direct call to generator failed: {e}")
+
+    # isclient=false → 기존 큐 처리
+    else:
+        job_queue.put(job)
+        return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
 
 @app.post("/api/video/callback")
 async def generator_callback(request: Request):
@@ -284,6 +341,18 @@ async def generator_callback(request: Request):
         done_evt = info.get("doneEvt") if info else None
 
     if info is None:
+        event = {
+            "eventId": cb.get("eventId") or f"evt_{cb.get('requestId')}_late",
+            "requestId": cb.get("requestId"),
+            "jobId": cb.get("jobId"),
+            "prompt": cb.get("prompt"),
+            "type": cb.get("type") or "unknown",
+            "resultKey": cb.get("resultKey") if cb.get("status") == "SUCCESS" else None,
+            "status": cb.get("status") or "FAILED",
+            "message": cb.get("message") or "late callback",
+            "createdAt": cb.get("createdAt") or now_utc().isoformat()
+        }
+        produce_kafka(event["eventId"], event)
         return JSONResponse({"ok": True, "late": True})
 
     if done_evt:
