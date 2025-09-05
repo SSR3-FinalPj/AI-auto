@@ -323,7 +323,8 @@ def enqueue_generate_video(
 
     # isclient=false → 기존 큐 처리
     else:
-        job_queue.put(job)
+        prio = 1
+        job_queue.put((prio, job))
         return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
 
 @app.post("/api/video/callback")

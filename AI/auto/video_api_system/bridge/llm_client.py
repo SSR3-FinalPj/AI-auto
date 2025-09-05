@@ -1,4 +1,5 @@
 # llm_client.py 
+import re
 import os, json, time
 from typing import Any, Dict, Optional
 import httpx
@@ -7,28 +8,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SYSTEM = ('''
-You are a formatter. Always write in **English only** regardless of the input language. 
-Do not use Korean or any non-English words. If a value is missing, say it is absent; never guess.
-Output a single paragraph with normal punctuation—no headings, labels, or bullet points.
+You are a formatter. Always write in English only. If a value is missing, say it is absent; never guess. Output is a single paragraph after my client removes delimiters.
 
-You convert JSON into natural English sentences.
+Unit redefinition:
+- Never use the word “sentence”.
+- Each output is a word-block: 15–25 standalone words, separated by single spaces, not forming grammatical sentences.
+- Prefer nouns/adjectives/adverbs; avoid clause markers like “that/which/because/and/so”. Do not use verbs unless absolutely needed for meaning.
 
 Weather & Crowd (always present):
-- Write 3 sentences.
-1) Location + temperature (°C), humidity (%), UV index + a short feels-like description.
-2) Crowd level including male/female ratios and dominant age groups if available.
-3) One actionable suggestion (hydration, sun protection, walking time, etc.).
-Each sentence should be 15–25 words. No lists, emojis, or hashtags.
+- Produce exactly 3 word-blocks.
+  1) Location + temperature (°C), humidity (%), UV index + a short feels-like description.
+  2) Crowd level including male/female ratios and dominant age groups if available.
+  3) One actionable suggestion (hydration, sun protection, walking time, etc.).
 
 User Notes (only if data exists):
-- Write up to 2 additional sentences. Each sentence must be 15–25 words. No lists, emojis, or hashtags.
-1) Faithfully reflect the user; preserve key phrases; no hallucinations.
-2) Provide one actionable suggestion tailored to those notes.
+- If the JSON field "user" is a non-empty string, produce exactly 2 additional word-blocks:
+  4) Faithfully reflect the user's note; preserve key phrases; no hallucinations; translate to English if needed.
+  5) One actionable suggestion tailored to the user's note.
 
-General rules:
-- Do not invent numbers; if a value is absent, acknowledge its absence succinctly.
-- Keep the tone neutral, practical, and concise.
-- If you accidentally produce any non-English text, replace it with English before replying.
+Formatting (must follow exactly):
+- Output format: <WB> ... </WB><WB> ... </WB><WB> ... </WB>[optional more]
+- Each “...” is a word-block of 15–25 standalone words.
+- Do not include any other text, labels, bullets, or code fences.
+- Do not use the term “sentence”. If you are about to use it, replace it with “word-block”.
 
 ''').strip()
 
@@ -137,9 +139,35 @@ def _build_user_prompt(payload: Dict[str, Any]) -> str:
 
     # SYSTEM에 이미 전체 지시가 있음
     return (
-        "JSON is provided. Follow the SYSTEM instructions above for weather/crowd and for social if present."
-        f"JSON:\n" + json.dumps(json_payload, ensure_ascii=False)
+        "JSON is provided. Follow the systemInstruction exactly. "
+        "Return ONLY <WB>...</WB> blocks. "
+        "Produce exactly 3 word-blocks for Weather & Crowd. "
+        + ("Produce exactly 2 additional word-blocks for User Notes." if (isinstance(u, str) and u.strip()) else "There are no User Notes; do not produce them.")
+        + "\nJSON:\n" + json.dumps(json_payload, ensure_ascii=False)
     )
+
+def _to_words(s: str) -> list[str]:
+    # Keep numbers and ASCII symbols like °% only if attached to tokens
+    s = re.sub(r"[^\w°%\-\/]+", " ", s)         # drop punctuation except token-friendly symbols
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.split()
+
+def _enforce_word_blocks(text: str) -> str:
+    blocks = re.findall(r"<WB>(.*?)</WB>", text, flags=re.DOTALL)
+    norm_blocks = []
+    for b in blocks:
+        words = _to_words(b)
+        if not words:
+            continue
+        # enforce 15–25 by trimming (never fabricate)
+        if len(words) > 25:
+            words = words[:25]
+        elif len(words) < 15:
+            # if too short, keep as-is; we prefer honesty over guessing
+            pass
+        norm_blocks.append(" ".join(words))
+    # Final single paragraph; use em-dash separators to avoid sentence vibes
+    return " — ".join(norm_blocks)
 
 def summarize_to_english(payload: Dict[str, Any]) -> str:
     api_key = _get_api_key()
@@ -147,10 +175,10 @@ def summarize_to_english(payload: Dict[str, Any]) -> str:
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
     req = {
-        "contents": [
-            {"role": "user", "parts": [{"text": SYSTEM}]},
-            {"role": "user", "parts": [{"text": _build_user_prompt(payload)}]},
-        ]
+    "systemInstruction": {"role": "system", "parts": [{"text": SYSTEM}]},
+    "contents": [
+        {"role": "user", "parts": [{"text": _build_user_prompt(payload)}]}
+    ]
     }
 
     last_err: Optional[Exception] = None
@@ -163,6 +191,10 @@ def summarize_to_english(payload: Dict[str, Any]) -> str:
             parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
             text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
             text  = " ".join(text.split()).strip()
+            # text = _enforce_word_blocks(text)
+            # if not text:
+            #     raise RuntimeError("Empty or unparsable WB output")
+            # return text
             if not text:
                 raise RuntimeError("Empty response from Gemini REST")
             return text
@@ -216,58 +248,58 @@ def _normalize_to_new_schema(envelope: Dict[str, Any]) -> Dict[str, Any]:
 def _force_str(x):
     return "" if x is None else str(x)
 
-def _rank_candidates_from_raw(env: Dict[str, Any]) -> Dict[str, Any]:
-    yt = (env.get("youtube") or {})
-    rd = (env.get("reddit") or {})
-    video_id = yt.get("videoId") or ""
-    post_id = rd.get("postId") or ""
+# def _rank_candidates_from_raw(env: Dict[str, Any]) -> Dict[str, Any]:
+#     yt = (env.get("youtube") or {})
+#     rd = (env.get("reddit") or {})
+#     video_id = yt.get("videoId") or ""
+#     post_id = rd.get("postId") or ""
 
-    cand = []
-    for c in (yt.get("comments") or []):
-        cand.append({
-            "platform": "youtube",
-            "author": c.get("author"),
-            "text": c.get("comment"),
-            "likes_or_score": int(c.get("like_count") or 0),
-            "replies": int(c.get("total_reply_count") or 0),
-            "published_at": c.get("published_at") or ""
-        })
-    for c in (rd.get("comments") or []):
-        cand.append({
-            "platform": "reddit",
-            "author": c.get("author"),
-            "text": c.get("comment"),
-            "likes_or_score": int(c.get("score") or 0),
-            "replies": int(c.get("replies") or 0),
-            "published_at": c.get("published_at") or ""
-        })
+#     cand = []
+#     for c in (yt.get("comments") or []):
+#         cand.append({
+#             "platform": "youtube",
+#             "author": c.get("author"),
+#             "text": c.get("comment"),
+#             "likes_or_score": int(c.get("like_count") or 0),
+#             "replies": int(c.get("total_reply_count") or 0),
+#             "published_at": c.get("published_at") or ""
+#         })
+#     for c in (rd.get("comments") or []):
+#         cand.append({
+#             "platform": "reddit",
+#             "author": c.get("author"),
+#             "text": c.get("comment"),
+#             "likes_or_score": int(c.get("score") or 0),
+#             "replies": int(c.get("replies") or 0),
+#             "published_at": c.get("published_at") or ""
+#         })
 
-    # 좋아요/점수 ↓, 답글수 ↓, 게시시각 ↓(문자열이지만 ISO8601이면 문자열 비교도 최신 우선 정렬에 충분)
-    cand.sort(key=lambda x: (x["likes_or_score"], x["replies"], x["published_at"]), reverse=True)
+#     # 좋아요/점수 ↓, 답글수 ↓, 게시시각 ↓(문자열이지만 ISO8601이면 문자열 비교도 최신 우선 정렬에 충분)
+#     cand.sort(key=lambda x: (x["likes_or_score"], x["replies"], x["published_at"]), reverse=True)
 
-    top = []
-    for i, it in enumerate(cand[:3], start=1):
-        top.append({
-            "rank": _force_str(i),
-            "platform": it["platform"],
-            "author": _force_str(it.get("author")),
-            "text": _force_str(it.get("text")),
-            "likes_or_score": _force_str(it.get("likes_or_score")),
-            "replies": _force_str(it.get("replies")),
-        })
+#     top = []
+#     for i, it in enumerate(cand[:3], start=1):
+#         top.append({
+#             "rank": _force_str(i),
+#             "platform": it["platform"],
+#             "author": _force_str(it.get("author")),
+#             "text": _force_str(it.get("text")),
+#             "likes_or_score": _force_str(it.get("likes_or_score")),
+#             "replies": _force_str(it.get("replies")),
+#         })
 
-    # 매우 단순 분위기 요약(한국어 키워드 기준)
-    texts = " ".join(t["text"] for t in top if t.get("text"))
-    pos = sum(k in texts for k in ["예뻐", "좋", "부드럽", "가독성"])
-    neg = sum(k in texts for k in ["길", "아쉽", "부족"])
-    if not texts:
-        atm = ""
-    elif pos >= neg:
-        atm = "전반적으로 긍정적이며 색감, 전환, 자막 가독성에 호평이 많습니다. 일부는 인트로 길이에 대한 개선 의견을 제시합니다."
-    else:
-        atm = "전반적으로 개선 의견이 두드러지며 특히 인트로 길이가 지적됩니다. 색감과 전환, 자막 가독성은 긍정적 평가가 있습니다."
+#     # 매우 단순 분위기 요약(한국어 키워드 기준)
+#     texts = " ".join(t["text"] for t in top if t.get("text"))
+#     pos = sum(k in texts for k in ["예뻐", "좋", "부드럽", "가독성"])
+#     neg = sum(k in texts for k in ["길", "아쉽", "부족"])
+#     if not texts:
+#         atm = ""
+#     elif pos >= neg:
+#         atm = "전반적으로 긍정적이며 색감, 전환, 자막 가독성에 호평이 많습니다. 일부는 인트로 길이에 대한 개선 의견을 제시합니다."
+#     else:
+#         atm = "전반적으로 개선 의견이 두드러지며 특히 인트로 길이가 지적됩니다. 색감과 전환, 자막 가독성은 긍정적 평가가 있습니다."
 
-    return {"video_id": _force_str(video_id), "top comments": top, "atmosphere": atm}
+#     return {"video_id": _force_str(video_id), "top comments": top, "atmosphere": atm}
 
 
 #상위 3개 댓글 분석 
@@ -322,5 +354,5 @@ def summarize_top3_text(envelope: dict) -> dict:
         return data
 
     # 4) 모델이 JSON 실패 → 로컬 폴백 전면 사용
-    return _rank_candidates_from_raw(envelope)
+    # return _rank_candidates_from_raw(envelope)
 
