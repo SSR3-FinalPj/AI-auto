@@ -327,6 +327,95 @@ def enqueue_generate_video(
         job_queue.put((prio, job))
         return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
 
+@app.post("/api/veo3-generate")
+def enqueue_veo3_generate(
+    payload: BridgeIn,
+    idem_key: Optional[str] = Header(default=None, alias="Idempotency-Key")
+):
+    try:
+        data = payload.model_dump()
+    except ValidationError as e:
+        raise HTTPException(400, str(e))
+
+    derived_key = idem_key or body_hash({
+        "jobId": data["jobId"],
+        "platform": data["platform"],
+        "weather": data["weather"],
+        "user": data.get("user")
+    })
+    with lock:
+        if derived_key in idemp_index:
+            req_id = idemp_index[derived_key]
+            return JSONResponse(
+                {"requestId": req_id, "enqueued": True, "deduplicated": True},
+                status_code=202
+                )
+        req_id = make_id()
+        idemp_index[derived_key] = req_id
+
+    job = {**data, "requestId": req_id, "_enqueuedAt": now_utc().isoformat()}
+
+    # isclient=true → direct 처리 (LLM + inflight + generator_server 호출)
+    if job.get("isclient"):
+        print(f"[DIRECT] isclient=True, generator_server 직접 호출")
+
+        done_evt = threading.Event()
+        try:
+            with lock:
+                inflight[req_id] = {
+                    "jobId": job["jobId"],
+                    "payload": job,
+                    "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
+                    "enqueuedAt": job["_enqueuedAt"],
+                    "doneEvt": done_evt,
+                }
+
+            try:
+                english_text = summarize_to_english(job)
+                job["_englishText"] = english_text
+                with lock:
+                    inflight[req_id]["englishText"] = english_text
+                log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
+            except Exception as e:
+                w = job.get("weather", {})
+                english_text = (
+                    f"{w.get('areaName','Unknown area')}: "
+                    f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
+                    f"UV {w.get('uvIndex','?')}."
+                )
+                job["_englishText"] = english_text
+                with lock:
+                    inflight[req_id]["englishText"] = english_text
+                log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
+
+            with httpx.Client(timeout=10) as cli:
+                gen_body = {
+                    "requestId": req_id,
+                    "jobId": job["jobId"],
+                    "platform": job.get("platform"),
+                    "img": job.get("img"),
+                    "isclient": True,
+                    "englishText": job["_englishText"],
+                }
+                if not GENERATOR_ENDPOINT:
+                    raise RuntimeError("GENERATOR_ENDPOINT is not set")
+                r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
+                r.raise_for_status()
+
+            return JSONResponse({"requestId": req_id, "enqueued": False, "direct": True}, status_code=202)
+
+        except Exception as e:
+            with lock:
+                inflight.pop(req_id, None)
+            print(f"[DIRECT_FAIL][{req_id}] {e}")
+            raise HTTPException(502, f"direct call to generator failed: {e}")
+
+    # isclient=false → 기존 큐 처리
+    else:
+        prio = 1
+        job_queue.put((prio, job))
+        return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
+
 @app.post("/api/video/callback")
 async def generator_callback(request: Request):
     raw = await request.body()
