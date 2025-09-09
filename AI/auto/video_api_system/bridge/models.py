@@ -30,3 +30,15 @@ class BridgeIn(BaseModel):
 
 class Envelope(BaseModel):
     topic: Dict[str, Any] = None 
+
+
+class VeoBridge(BaseModel):
+    img: str
+    jobId: int
+    platform: str
+    isclient: bool = False
+    weather: Optional[Weather]
+    beforeprompt: Optional[str] = None 
+    user: Optional[str] = None
+    element: Optional[Dict[str, Any]]
+

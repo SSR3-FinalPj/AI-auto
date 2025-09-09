@@ -113,6 +113,72 @@ ANALYSIS = ("""
 - JSON 이외의 텍스트/코드블록/주석/접두·접미 문구를 절대 포함하지 마세요.
 """).strip()
 
+KEYWORD = ("""
+당신은 사용자의 의도를 파악하는 전문가입니다. 
+사용자의 의도를 파악하기 위해 아래의 내용을 익히세요
+
+프롬프트 작성 기본사항
+유용한 프롬프트는 설명적이고 명확합니다. Veo를 최대한 활용하려면 먼저 핵심 아이디어를 파악하고, 키워드와 수정자를 추가하여 아이디어를 조정하고, 동영상 관련 용어를 프롬프트에 포함하세요.
+
+프롬프트에 다음 요소를 포함해야 합니다.
+
+1.주제: 동영상에 담고 싶은 사물, 사람, 동물 또는 풍경입니다(예: 도시 경관, 자연, 차량, 강아지).
+2.동작: 피사체가 하는 행동입니다 (예: 걷기, 달리기, 머리 돌리기).
+3.스타일: SF, 공포 영화, 필름 누아르 또는 만화와 같은 애니메이션 스타일 등 특정 영화 스타일 키워드를 사용하여 크리에이티브 방향을 지정합니다.
+4.카메라 위치 및 모션: [선택사항] 공중 촬영, 눈높이, 위에서 아래로 촬영, 돌리 샷, 로우 앵글과 같은 용어를 사용하여 카메라의 위치와 움직임을 제어합니다.
+5.구도: [선택사항] 와이드 샷, 클로즈업, 싱글 샷, 투 샷 등 촬영이 프레이밍되는 방식입니다.
+6.초점 및 렌즈 효과: [선택사항] 얕은 초점, 깊은 초점, 부드러운 초점, 매크로 렌즈, 광각 렌즈와 같은 용어를 사용하여 특정 시각 효과를 구현합니다.
+7.분위기: [선택사항] 색상과 조명이 장면에 기여하는 방식(예: 파란색 톤, 야간, 따뜻한 색조)입니다.
+프롬프트 작성을 위한 추가 도움말
+설명적인 언어 사용: 형용사와 부사를 사용하여 Veo에서 명확한 그림을 그릴 수 있도록 합니다.
+얼굴 세부정보 개선: 프롬프트에서 인물 사진이라는 단어를 사용하는 등 얼굴 세부정보를 사진의 초점으로 지정합니다.
+
+[1번 요구사항을 최우선순위로 두고 출력 형식을 채우세요.]
+1.user가 요구하는 내용이 프롬프트 요소 중 1번부터 7번까지 어디에 포함되는지 분석해서 출력 형식에 삽입하세요.(한개 이상 선택하여 입력된 내용의 키워드를 적으세요.)
+2.출력 형식의 null 값 중에 element의 null값이 아닌 내용이 있다면 채우세요. 
+           
+[출력 형식]
+{
+    "subject":"string|null"
+    "Action":"string|null"
+    "Style":"string|null"
+    "Camera positioning and motion":"string|null"
+    "Composition":"string|null"
+    "Focus and lens effects":"string|null"
+    "Ambiance":"string|null"
+}
+
+""").strip
+
+VEO = ("""
+당신은 입력된 데이터를 최상의 프롬프트로 변환하는 프롬프트 전문가입니다. 
+프롬프트를 작성하기 위해 아래의 규칙을 확인하세요
+
+프롬프트 작성 기본사항
+유용한 프롬프트는 설명적이고 명확합니다. Veo를 최대한 활용하려면 먼저 핵심 아이디어를 파악하고, 키워드와 수정자를 추가하여 아이디어를 조정하고, 동영상 관련 용어를 프롬프트에 포함하세요.
+
+프롬프트에 다음 요소를 포함해야 합니다.
+
+1.주제: 동영상에 담고 싶은 사물, 사람, 동물 또는 풍경입니다(예: 도시 경관, 자연, 차량, 강아지).
+2.동작: 피사체가 하는 행동입니다 (예: 걷기, 달리기, 머리 돌리기).
+3.스타일: SF, 공포 영화, 필름 누아르 또는 만화와 같은 애니메이션 스타일 등 특정 영화 스타일 키워드를 사용하여 크리에이티브 방향을 지정합니다.
+4.카메라 위치 및 모션: [선택사항] 공중 촬영, 눈높이, 위에서 아래로 촬영, 돌리 샷, 로우 앵글과 같은 용어를 사용하여 카메라의 위치와 움직임을 제어합니다.
+5.구도: [선택사항] 와이드 샷, 클로즈업, 싱글 샷, 투 샷 등 촬영이 프레이밍되는 방식입니다.
+6.초점 및 렌즈 효과: [선택사항] 얕은 초점, 깊은 초점, 부드러운 초점, 매크로 렌즈, 광각 렌즈와 같은 용어를 사용하여 특정 시각 효과를 구현합니다.
+7.분위기: [선택사항] 색상과 조명이 장면에 기여하는 방식(예: 파란색 톤, 야간, 따뜻한 색조)입니다.
+프롬프트 작성을 위한 추가 도움말
+설명적인 언어 사용: 형용사와 부사를 사용하여 Veo에서 명확한 그림을 그릴 수 있도록 합니다.
+얼굴 세부정보 개선: 프롬프트에서 인물 사진이라는 단어를 사용하는 등 얼굴 세부정보를 사진의 초점으로 지정합니다.
+
+1번이 최우선순위, 그 다음 숫자로 갈수록 우선순위가 낮아집니다.
+[extract]
+1. "null값이 아닌 요소들을 단어 형태로 작성하세요"
+2. "null값인 요소들을 임의의 단어로 채워넣으세요."
+[Weather(Only if data exists)]
+
+
+""").strip
+
 def _get_api_key() -> str:
     # import 시점이 아닌 호출 시점에 키를 읽어 예외를 뒤로 미룸
     key = (os.getenv("GOOGLE_API_KEY") or "").strip().strip('"').strip("'")
@@ -127,7 +193,7 @@ def _get_api_key() -> str:
 def _model_name() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-#프롬프트 생성 함수 
+#프롬프트 생성 함수
 def _build_user_prompt(payload: Dict[str, Any]) -> str:
     w = payload.get("weather") or {}
     u = payload.get("user") or {}
@@ -169,6 +235,7 @@ def _enforce_word_blocks(text: str) -> str:
     # Final single paragraph; use em-dash separators to avoid sentence vibes
     return " — ".join(norm_blocks)
 
+
 def summarize_to_english(payload: Dict[str, Any]) -> str:
     api_key = _get_api_key()
     model   = _model_name()
@@ -191,13 +258,13 @@ def summarize_to_english(payload: Dict[str, Any]) -> str:
             parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
             text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
             text  = " ".join(text.split()).strip()
-            # text = _enforce_word_blocks(text)
-            # if not text:
-            #     raise RuntimeError("Empty or unparsable WB output")
-            # return text
+            text = _enforce_word_blocks(text)
             if not text:
-                raise RuntimeError("Empty response from Gemini REST")
+                raise RuntimeError("Empty or unparsable WB output")
             return text
+            # if not text:
+            #     raise RuntimeError("Empty response from Gemini REST")
+            # return text
         except Exception as e:
             last_err = e
             if i < 2:
@@ -248,59 +315,6 @@ def _normalize_to_new_schema(envelope: Dict[str, Any]) -> Dict[str, Any]:
 def _force_str(x):
     return "" if x is None else str(x)
 
-# def _rank_candidates_from_raw(env: Dict[str, Any]) -> Dict[str, Any]:
-#     yt = (env.get("youtube") or {})
-#     rd = (env.get("reddit") or {})
-#     video_id = yt.get("videoId") or ""
-#     post_id = rd.get("postId") or ""
-
-#     cand = []
-#     for c in (yt.get("comments") or []):
-#         cand.append({
-#             "platform": "youtube",
-#             "author": c.get("author"),
-#             "text": c.get("comment"),
-#             "likes_or_score": int(c.get("like_count") or 0),
-#             "replies": int(c.get("total_reply_count") or 0),
-#             "published_at": c.get("published_at") or ""
-#         })
-#     for c in (rd.get("comments") or []):
-#         cand.append({
-#             "platform": "reddit",
-#             "author": c.get("author"),
-#             "text": c.get("comment"),
-#             "likes_or_score": int(c.get("score") or 0),
-#             "replies": int(c.get("replies") or 0),
-#             "published_at": c.get("published_at") or ""
-#         })
-
-#     # 좋아요/점수 ↓, 답글수 ↓, 게시시각 ↓(문자열이지만 ISO8601이면 문자열 비교도 최신 우선 정렬에 충분)
-#     cand.sort(key=lambda x: (x["likes_or_score"], x["replies"], x["published_at"]), reverse=True)
-
-#     top = []
-#     for i, it in enumerate(cand[:3], start=1):
-#         top.append({
-#             "rank": _force_str(i),
-#             "platform": it["platform"],
-#             "author": _force_str(it.get("author")),
-#             "text": _force_str(it.get("text")),
-#             "likes_or_score": _force_str(it.get("likes_or_score")),
-#             "replies": _force_str(it.get("replies")),
-#         })
-
-#     # 매우 단순 분위기 요약(한국어 키워드 기준)
-#     texts = " ".join(t["text"] for t in top if t.get("text"))
-#     pos = sum(k in texts for k in ["예뻐", "좋", "부드럽", "가독성"])
-#     neg = sum(k in texts for k in ["길", "아쉽", "부족"])
-#     if not texts:
-#         atm = ""
-#     elif pos >= neg:
-#         atm = "전반적으로 긍정적이며 색감, 전환, 자막 가독성에 호평이 많습니다. 일부는 인트로 길이에 대한 개선 의견을 제시합니다."
-#     else:
-#         atm = "전반적으로 개선 의견이 두드러지며 특히 인트로 길이가 지적됩니다. 색감과 전환, 자막 가독성은 긍정적 평가가 있습니다."
-
-#     return {"video_id": _force_str(video_id), "top comments": top, "atmosphere": atm}
-
 
 #상위 3개 댓글 분석 
 def summarize_top3_text(envelope: dict) -> dict:
@@ -331,21 +345,6 @@ def summarize_top3_text(envelope: dict) -> dict:
                     it["likes_or_score"] = _force_str(it.get("likes_or_score"))
                     it["replies"] = _force_str(it.get("replies"))
 
-        # 3-1) **빈 결과 보강**: top이 비었거나 atmosphere가 공백이면 로컬 폴백 사용
-        # needs_fallback = (not top_key) or (not data.get(top_key)) or (not data.get("atmosphere", "").strip())
-        # if needs_fallback:
-        #     fb = _rank_candidates_from_raw(envelope)
-        #     data.setdefault("video_id", fb["video_id"])
-        #     # top 보강
-        #     if (not top_key) or (not data.get(top_key)):
-        #         data["top comments"] = fb["top comments"]
-        #     else:
-        #         # 만약 key가 top_comments였다면 일관성을 위해 "top comments"로 통일
-        #         if top_key == "top_comments":
-        #             data["top comments"] = data.pop("top_comments")
-        #     # 분위기 보강
-        #     if not data.get("atmosphere", "").strip():
-        #         data["atmosphere"] = fb["atmosphere"]
         else:
             # key 통일
             if top_key == "top_comments":
@@ -353,6 +352,87 @@ def summarize_top3_text(envelope: dict) -> dict:
 
         return data
 
-    # 4) 모델이 JSON 실패 → 로컬 폴백 전면 사용
-    # return _rank_candidates_from_raw(envelope)
+async def extract_keyword(input: Dict[str, Any]) -> dict:
+    api_key = _get_api_key()
+    model   = _model_name()
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+    inp = dict(input) if input else {}
+    user = (inp.get("user") or {})
+    el = (inp.get("element") or {})
+    be = (inp.get("beforeprompt") or {})
+
+    req = {
+    "systemInstruction": {"role": "system", "parts": [{"text": KEYWORD}]},
+    "contents": [
+        {"role": "user", "parts": [{"text":user}]},
+        {"role": "user", "parts": [{"text":be}]},
+        {"role": "user", "parts": [{"text":el}]}
+        ]
+    }
+
+    last_err: Optional[Exception] = None
+    for i in range(3):
+        try:
+            with httpx.Client(timeout=20) as cli:
+                resp = cli.post(endpoint, json=req)
+            resp.raise_for_status()
+            data = resp.json()
+            parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+            text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
+            text  = " ".join(text.split()).strip()
+            if not text:
+                raise RuntimeError("Empty response from Gemini REST")
+        except Exception as e:
+            last_err = e
+            if i < 2:
+                time.sleep(0.6*(i+1))
+            else:
+                raise RuntimeError(f"Gemini REST failed: {e}") from e
+
+    # 2) JSON 추출 시도
+    text = (text or "").strip().strip("`").strip()
+    start, end = text.find("{"), text.rfind("}")
+    data = None
+    if start != -1 and end != -1 and end > start:
+        try:
+            data = json.loads(text[start:end+1])
+        except Exception:
+            data = None
+
+    # 3) 정상 응답이면 키 보정 + 숫자 문자열화 + video_id 보강
+    if data and isinstance(data, dict):
+        return data
+
+async def veoprompt_generate(payload: Dict[str, Any]) -> str:
+    api_key = _get_api_key()
+    model   = _model_name()
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+    extract = await extract_keyword(payload)
+    if extract != None:
+        req = {"contents": [{"role":"user","parts":[{"text":VEO}]},
+                            {"role":"user","parts":[{"text":extract}]}]}
+
+        last_err: Optional[Exception] = None
+        for i in range(3):
+            try:
+                with httpx.Client(timeout=20) as cli:
+                    resp = cli.post(endpoint, json=req)
+                resp.raise_for_status()
+                data = resp.json()
+                parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+                text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
+                text  = " ".join(text.split()).strip()
+                text = _enforce_word_blocks(text)
+                if not text:
+                    raise RuntimeError("Empty response from Gemini REST")
+                return text
+            except Exception as e:
+                last_err = e
+                if i < 2:
+                    time.sleep(0.6*(i+1))
+                else:
+                    raise RuntimeError(f"Gemini REST failed: {e}") from e
+                
 

@@ -4,14 +4,15 @@ from typing import Optional, Any, Dict
 from queue import PriorityQueue
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+import asyncio
+from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
-from llm_client import summarize_to_english, summarize_top3_text
+from llm_client import summarize_to_english, summarize_top3_text, extract_keyword, veoprompt_generate
 from dotenv import load_dotenv
-from models import Weather, BridgeIn, Envelope
+from models import Weather, BridgeIn, Envelope, VeoBridge
 load_dotenv()
 
 # -------------------
@@ -327,9 +328,10 @@ def enqueue_generate_video(
         job_queue.put((prio, job))
         return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
 
+#-------------veo3로 동영상 제작
 @app.post("/api/veo3-generate")
-def enqueue_veo3_generate(
-    payload: BridgeIn,
+async def enqueue_veo3_generate(
+    payload: VeoBridge,
     idem_key: Optional[str] = Header(default=None, alias="Idempotency-Key")
 ):
     try:
@@ -339,7 +341,6 @@ def enqueue_veo3_generate(
 
     derived_key = idem_key or body_hash({
         "jobId": data["jobId"],
-        "platform": data["platform"],
         "weather": data["weather"],
         "user": data.get("user")
     })
@@ -355,67 +356,61 @@ def enqueue_veo3_generate(
 
     job = {**data, "requestId": req_id, "_enqueuedAt": now_utc().isoformat()}
 
-    # isclient=true → direct 처리 (LLM + inflight + generator_server 호출)
-    if job.get("isclient"):
-        print(f"[DIRECT] isclient=True, generator_server 직접 호출")
+    done_evt = threading.Event()
+    with lock:
+        inflight[req_id] = {
+            "jobId": job["jobId"],
+            "payload": job,
+            "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
+            "enqueuedAt": job["_enqueuedAt"],
+            "doneEvt": done_evt,
+        }
+    try:
+        extracted = await extract_keyword(job)  # llm_client의 async 함수
+        if extracted is None:
+            extracted = {}
+    except Exception as e:
+        # 실패해도 서비스는 계속 진행: 빈 dict로 응답
+        print(f"[VEO3][{req_id}] extract_keyword failed: {e}")
+        extracted = {}
 
-        done_evt = threading.Event()
+    # 2) 백그라운드로 VEO 프롬프트 생성 → GENERATOR_ENDPOINT 전송
+    async def _bg_task():
         try:
-            with lock:
-                inflight[req_id] = {
-                    "jobId": job["jobId"],
-                    "payload": job,
-                    "deadline": now_utc() + timedelta(seconds=TTL_SECONDS),
-                    "enqueuedAt": job["_enqueuedAt"],
-                    "doneEvt": done_evt,
-                }
+            veoprompt = await veoprompt_generate(job)  # llm_client의 async 함수
+            # 제너레이터로 보낼 바디 구성 (필요 필드 포함)
+            gen_body = {
+                "requestId": req_id,
+                "jobId": job["jobId"],
+                "platform": job.get("platform"),
+                "img": job.get("img"),
+                "isclient": True,
+                "veoPrompt": veoprompt,
+            }
+            if not GENERATOR_ENDPOINT:
+                raise RuntimeError("GENERATOR_ENDPOINT is not set")
 
-            try:
-                english_text = summarize_to_english(job)
-                job["_englishText"] = english_text
-                with lock:
-                    inflight[req_id]["englishText"] = english_text
-                log_once(req_id, f"[LLM_OK][{req_id}] {english_text}")
-            except Exception as e:
-                w = job.get("weather", {})
-                english_text = (
-                    f"{w.get('areaName','Unknown area')}: "
-                    f"{w.get('temperature','?')}°C, humidity {w.get('humidity','?')}%, "
-                    f"UV {w.get('uvIndex','?')}."
-                )
-                job["_englishText"] = english_text
-                with lock:
-                    inflight[req_id]["englishText"] = english_text
-                log_once(req_id, f"[LLM_FALLBACK][{req_id}] {english_text} | err={e}")
-
-            with httpx.Client(timeout=10) as cli:
-                gen_body = {
-                    "requestId": req_id,
-                    "jobId": job["jobId"],
-                    "platform": job.get("platform"),
-                    "img": job.get("img"),
-                    "isclient": True,
-                    "englishText": job["_englishText"],
-                }
-                if not GENERATOR_ENDPOINT:
-                    raise RuntimeError("GENERATOR_ENDPOINT is not set")
-                r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
+            # 비동기 HTTP 전송
+            to = httpx.Timeout(connect=3, read=10, write=10, pool=5)
+            async with httpx.AsyncClient(timeout=to) as cli:
+                r = await cli.post(GENERATOR_ENDPOINT, json=gen_body)
                 r.raise_for_status()
-
-            return JSONResponse({"requestId": req_id, "enqueued": False, "direct": True}, status_code=202)
-
         except Exception as e:
-            with lock:
-                inflight.pop(req_id, None)
-            print(f"[DIRECT_FAIL][{req_id}] {e}")
-            raise HTTPException(502, f"direct call to generator failed: {e}")
+            print(f"[VEO3_BG_FAIL][{req_id}] {e}")
+        finally:
+            # inflight 정리는 콜백에서 하므로 여기서는 건드리지 않음
+            pass
 
-    # isclient=false → 기존 큐 처리
-    else:
-        prio = 1
-        job_queue.put((prio, job))
-        return JSONResponse({"requestId": req_id, "enqueued": True, "deduplicated": False}, status_code=202)
+    asyncio.create_task(_bg_task())
 
+    # 3) 클라이언트에 먼저 응답
+    return JSONResponse(
+        {"requestId": req_id, "extracted": extracted, "direct": True},
+        status_code=202
+    )
+
+
+#video callback api -------------------------------------------
 @app.post("/api/video/callback")
 async def generator_callback(request: Request):
     raw = await request.body()
@@ -481,6 +476,7 @@ async def generator_callback(request: Request):
 
     return JSONResponse({"ok": True, "late": False})
 
+#queue 상태 --------------------------------
 @app.get("/queue/stats")
 def stats():
     with lock:
@@ -489,14 +485,15 @@ def stats():
             "inflight": len(inflight),
             "completed": len(completed)
         }
-
+#상태 -------------------------------------
 @app.get("/healthz")
 def health():
     return {"ok": True}
 
+#댓글분석 api ----------------------------------
 @app.post("/api/comments")
 def comments_top3(envelope: Dict[str, Any]):
     if not envelope:
-        raise HTTPException(400, "youtube 또는 reddit 중 최소 하나는 포함해야 합니다.")
+        raise HTTPException(400, "데이터는 Dictionary 형태여야 합니다.")
     data = summarize_top3_text(envelope)
     return JSONResponse(content=data, status_code=200)
