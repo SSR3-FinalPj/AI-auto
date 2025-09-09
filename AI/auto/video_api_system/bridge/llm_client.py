@@ -148,7 +148,7 @@ KEYWORD = ("""
     "Ambiance":"string|null"
 }
 
-""").strip
+""").strip()
 
 VEO = ("""
 당신은 입력된 데이터를 최상의 프롬프트로 변환하는 프롬프트 전문가입니다. 
@@ -173,11 +173,13 @@ VEO = ("""
 1번이 최우선순위, 그 다음 숫자로 갈수록 우선순위가 낮아집니다.
 [extract]
 1. "null값이 아닌 요소들을 단어 형태로 작성하세요"
-2. "null값인 요소들을 임의의 단어로 채워넣으세요."
+2. "null값인 요소들을 beforeprompt와 겹치지 않는 임의의 단어로 채워넣으세요."
 [Weather(Only if data exists)]
+3. "날씨 데이터를 단어 형태로 한 줄로 작성하세요."
 
 
-""").strip
+
+""").strip()
 
 def _get_api_key() -> str:
     # import 시점이 아닌 호출 시점에 키를 읽어 예외를 뒤로 미룸
@@ -357,17 +359,22 @@ async def extract_keyword(input: Dict[str, Any]) -> dict:
     model   = _model_name()
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
+
     inp = dict(input) if input else {}
     user = (inp.get("user") or {})
     el = (inp.get("element") or {})
     be = (inp.get("beforeprompt") or {})
 
+    json_payload = {
+        "user":user,
+        "element":el,
+        "beforeprompt":be
+    }
+    
     req = {
     "systemInstruction": {"role": "system", "parts": [{"text": KEYWORD}]},
     "contents": [
-        {"role": "user", "parts": [{"text":user}]},
-        {"role": "user", "parts": [{"text":be}]},
-        {"role": "user", "parts": [{"text":el}]}
+        {"role": "user", "parts": [{"text":json.dumps(json_payload, ensure_ascii=False)}]}
         ]
     }
 
@@ -412,7 +419,7 @@ async def veoprompt_generate(payload: Dict[str, Any]) -> str:
     extract = await extract_keyword(payload)
     if extract != None:
         req = {"contents": [{"role":"user","parts":[{"text":VEO}]},
-                            {"role":"user","parts":[{"text":extract}]}]}
+                            {"role":"user","parts":[{"text":json.dumps(extract, ensure_ascii=False)}]}]}
 
         last_err: Optional[Exception] = None
         for i in range(3):
@@ -424,14 +431,23 @@ async def veoprompt_generate(payload: Dict[str, Any]) -> str:
                 parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
                 text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
                 text  = " ".join(text.split()).strip()
-                text = _enforce_word_blocks(text)
+
+                # 2) safety block 여부 확인 (있으면 원인 로그)
+                pf = data.get("promptFeedback") or {}
+                if not text and pf.get("blockReason"):
+                    raise RuntimeError(f"Gemini blocked: {pf.get('blockReason')}")
+
+                # 3) 빈 응답 방어
                 if not text:
+                    # 원문 일부라도 로깅해서 추적
                     raise RuntimeError("Empty response from Gemini REST")
+
                 return text
+
             except Exception as e:
                 last_err = e
                 if i < 2:
-                    time.sleep(0.6*(i+1))
+                    time.sleep(0.6 * (i + 1))
                 else:
                     raise RuntimeError(f"Gemini REST failed: {e}") from e
                 
