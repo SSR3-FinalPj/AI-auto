@@ -21,10 +21,9 @@ load_dotenv()
 
 # Gemini / Veo3
 GEMINI_API_KEY   = os.getenv("GEMINI_API_KEY", "")
-VEO3_MODEL       = os.getenv("VEO3_MODEL", "veo-3.0-generate-001")  # 또는 veo-3.0-fast-generate-001
-ASPECT_RATIO     = os.getenv("VEO3_ASPECT_RATIO", "16:9")           # "16:9" | "9:16"
-RESOLUTION       = os.getenv("VEO3_RESOLUTION", "1080p")            # 16:9만 1080p, 9:16은 720p
-# 이미지→비디오(personGeneration) 정책: Veo 3에서는 allow_adult만 허용(지역 제한 주의)
+VEO3_MODEL       = os.getenv("VEO3_MODEL", "veo-3.0-generate-001")
+ASPECT_RATIO     = os.getenv("VEO3_ASPECT_RATIO", "16:9")
+RESOLUTION       = os.getenv("VEO3_RESOLUTION", "1080p")
 PERSON_GEN       = os.getenv("VEO3_PERSON_GENERATION", "allow_adult")
 NEGATIVE_PROMPT  = os.getenv("VEO3_NEGATIVE_PROMPT", "")
 POLL_INTERVAL_S  = int(os.getenv("VEO3_POLL_INTERVAL_S", "5"))
@@ -34,13 +33,13 @@ CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8000/api/v
 
 # S3 in/out
 S3_REGION        = os.getenv("S3_REGION", "")
-S3_IMAGE_BUCKET  = os.getenv("S3_IMAGE_BUCKET", "")       # 입력 이미지 버킷(필수)
-S3_IMAGE_PREFIX  = os.getenv("S3_IMAGE_PREFIX", "")       # 입력 프리픽스(선택)
-S3_VIDEO_BUCKET  = os.getenv("S3_VIDEO_BUCKET", "")       # 출력 비디오 버킷(필수)
+S3_IMAGE_BUCKET  = os.getenv("S3_IMAGE_BUCKET", "")
+S3_IMAGE_PREFIX  = os.getenv("S3_IMAGE_PREFIX", "")
+S3_VIDEO_BUCKET  = os.getenv("S3_VIDEO_BUCKET", "")
 S3_OUTPUT_PREFIX = os.getenv("S3_OUTPUT_PREFIX", "")
-PRESIGN_EXPIRE_S = int(os.getenv("S3_PRESIGN_EXPIRE_S", "86400"))  # 초 단위(기본 24시간)
+PRESIGN_EXPIRE_S = int(os.getenv("S3_PRESIGN_EXPIRE_S", "86400"))
 
-# 로컬 저장 경로 (예: D:\AI_auto\AI\AI\output)
+# 로컬 저장 경로
 LOCAL_OUTPUT_DIR = os.getenv("LOCAL_OUTPUT_DIR", "")
 os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
 
@@ -62,27 +61,23 @@ s3_resource = boto3.resource("s3", region_name=S3_REGION)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # -------------------
-# 요청 스키마 (브리지 -> 제너레이터)
+# 요청 스키마
 # -------------------
 class GenIn(BaseModel):
     requestId: str
     jobId: int | str
     platform: Optional[str] = None
-    img: Optional[str] = None      # 파일명만 올 수 있음(예: "010f...902.jpg")
+    img: Optional[str] = None
     isclient: Optional[bool] = None
-    englishText: str
+    veoPrompt: str   # 프롬프트는 veoPrompt 필수
 
 app = FastAPI(title="Veo3 Generator (Image→Video, S3 & Local)")
-# 로컬 결과 미디어 정적 서빙(개발 편의)
 app.mount("/media", StaticFiles(directory=LOCAL_OUTPUT_DIR), name="media")
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def normalize_video_params(aspect_ratio: str, resolution: str) -> Tuple[str, str]:
-    """
-    Veo 3 스펙: 16:9 → 720p/1080p, 9:16 → 720p만 지원. 9:16에서 1080p 요청 시 720p로 보정.
-    """
     ar = aspect_ratio.strip()
     res = resolution.strip().lower()
     if ar == "9:16" and res == "1080p":
@@ -143,7 +138,7 @@ def post_callback(payload: dict):
 # -------------------
 def run_generation(job: GenIn):
     event_id = f"evt_{job.requestId}_{uuid.uuid4().hex[:6]}"
-    prompt = job.englishText
+    prompt = job.veoPrompt
 
     try:
         print(f"[{now_iso()}] === 영상 생성 요청 시작 ===", flush=True)
@@ -200,7 +195,7 @@ def run_generation(job: GenIn):
             "jobId": job.jobId,
             "prompt": prompt,
             "type": "video",
-            "resultKey": local_name,   # 파일명만 전달
+            "resultKey": local_name,
             "status": "SUCCESS",
             "message": "veo3 generation success",
             "createdAt": now_iso(),
@@ -227,15 +222,11 @@ def run_generation(job: GenIn):
         except Exception as e2:
             print(f"[{now_iso()}] 실패 콜백 전송 실패: {e2}", flush=True)
 
-
-@app.post("/generate")
-def generate(body: GenIn, bg: BackgroundTasks):
-    """
-    브리지가 GENERATOR_ENDPOINT로 POST 하는 엔드포인트
-    - 파일명만 온 경우도 지원: S3_IMAGE_BUCKET/S3_IMAGE_PREFIX 적용
-    - 결과는 콜백으로 반환( resultKey=파일명 )
-    """
-    if not body.englishText or not body.requestId:
+# 엔드포인트
+@app.post("/api/veo3-generate")
+def veo3_generate(body: GenIn, bg: BackgroundTasks):
+    if not body.veoPrompt or not body.requestId:
         raise HTTPException(status_code=400, detail="invalid payload")
+
     bg.add_task(run_generation, body)
-    return {"accepted": True, "requestId": body.requestId, "model": VEO3_MODEL}
+    return {"accepted": True, "requestId": body.requestId, "model": VEO3_MODEL, "type": "veo3"}
