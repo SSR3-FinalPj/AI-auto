@@ -26,9 +26,19 @@ class BridgeIn(BaseModel):
     platform: str
     isclient: bool = False
     weather: Weather
-    user: Optional[Dict[str, Any]] = None
+    user: Optional[str] = None
 
 class Envelope(BaseModel):
-    youtube: Optional[Dict[str, Any]] = None
-    reddit: Optional[Dict[str, Any]]  = None
-    topic: Optional[str] = None 
+    topic: Dict[str, Any] = None 
+
+
+class VeoBridge(BaseModel):
+    img: str
+    jobId: int
+    platform: str
+    isclient: bool = False
+    weather: Optional[Weather]
+    beforeprompt: Optional[str] = None 
+    user: Optional[str] = None
+    element: Optional[Dict[str, Any]]
+
