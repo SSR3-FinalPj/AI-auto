@@ -173,9 +173,10 @@ VEO = ("""
 1번이 최우선순위, 그 다음 숫자로 갈수록 우선순위가 낮아집니다.
 [extract]
 1. "null값이 아닌 요소들을 단어 형태로 작성하세요"
-2. "null값인 요소들을 beforeprompt와 겹치지 않는 임의의 단어로 채워넣으세요."
+2. "null값인 요소들을 sample의 요소로 채워넣으세요"
+3. "아직 null값인 요소들을 beforeprompt와 겹치지 않는 임의의 단어로 채워넣으세요."
 [Weather(Only if data exists)]
-3. "날씨 데이터를 단어 형태로 한 줄로 작성하세요."
+1. "날씨 데이터를 작성하세요."
 
 [출력 형식 : JSON 형태의 text로 전송]
 {
@@ -449,10 +450,12 @@ async def veoprompt_generate(payload: Dict[str, Any]) -> str:
         Di = dict(payload) if payload else {}
         be = (Di.get("beforeprompt") or {})
         wt = (Di.get("weather") or {})
+        sa = (Di.get("sample") or {})
 
         json_payload = {
             "beforeprompt":be,
-            "weather":wt
+            "weather":wt,
+            "sample":sa
         }
 
         req = {"contents": [{"role":"user","parts":[{"text":VEO}]},
