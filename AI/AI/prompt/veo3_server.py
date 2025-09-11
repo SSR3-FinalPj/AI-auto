@@ -1,3 +1,4 @@
+# veo3_server.py
 import os
 import time
 import uuid
@@ -15,7 +16,9 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from google import genai
-from google.genai import types  # GenerateVideosConfig, Image 등
+from google.genai import types
+from PIL import Image
+from io import BytesIO
 
 load_dotenv()
 
@@ -29,8 +32,7 @@ NEGATIVE_PROMPT  = os.getenv("VEO3_NEGATIVE_PROMPT", "")
 POLL_INTERVAL_S  = int(os.getenv("VEO3_POLL_INTERVAL_S", "5"))
 
 # Bridge 콜백
-#CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8000/api/video/callback")
-CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8001/api/video/callback")
+CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8000/api/video/callback")
 
 # S3 in/out
 S3_REGION        = os.getenv("S3_REGION", "")
@@ -50,7 +52,7 @@ if not GEMINI_API_KEY:
 if not S3_IMAGE_BUCKET or not S3_VIDEO_BUCKET:
     raise RuntimeError("S3_IMAGE_BUCKET, S3_VIDEO_BUCKET 을 .env에 설정하세요.")
 
-# boto3 클라이언트/리소스
+# boto3 클라이언트
 s3_client = boto3.client(
     "s3",
     region_name=S3_REGION,
@@ -62,28 +64,34 @@ s3_resource = boto3.resource("s3", region_name=S3_REGION)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # -------------------
-# 요청 스키마
+# 요청 스키마 (app.py와 호환: img, mascotimg)
 # -------------------
 class GenIn(BaseModel):
     requestId: str
     jobId: int | str
     platform: Optional[str] = None
-    img: Optional[str] = None
+    img: str           # 첫 번째 이미지 (예: 배경)
+    mascotimg: str     # 두 번째 이미지 (예: 마스코트)
     isclient: Optional[bool] = None
-    veoPrompt: str   # 프롬프트는 veoPrompt 필수
+    veoPrompt: str     # 최종 영상 제작 프롬프트
 
-app = FastAPI(title="Veo3 Generator (Image→Video, S3 & Local)")
+
+app = FastAPI(title="Veo3 + NanoBanana Generator")
 app.mount("/media", StaticFiles(directory=LOCAL_OUTPUT_DIR), name="media")
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
 def normalize_video_params(aspect_ratio: str, resolution: str) -> Tuple[str, str]:
     ar = aspect_ratio.strip()
     res = resolution.strip().lower()
+    # 공식 문서에 따르면 Veo 3의 9:16은 720p만 지원(1080p는 16:9 전용)
     if ar == "9:16" and res == "1080p":
         res = "720p"
     return ar, res
+
 
 def build_video_config() -> types.GenerateVideosConfig:
     ar, res = normalize_video_params(ASPECT_RATIO, RESOLUTION)
@@ -94,10 +102,12 @@ def build_video_config() -> types.GenerateVideosConfig:
         negative_prompt=NEGATIVE_PROMPT or None,
     )
 
+
 def _join_key(prefix: str, name: str) -> str:
     p = (prefix or "").strip().strip("/")
     n = name.strip().lstrip("/")
     return f"{p}/{n}" if p else n
+
 
 def parse_s3_uri_or_key(img: str) -> tuple[str, str]:
     if not img:
@@ -112,12 +122,14 @@ def parse_s3_uri_or_key(img: str) -> tuple[str, str]:
     key = img.lstrip("/")
     return S3_IMAGE_BUCKET, key
 
-def fetch_image_from_s3(img: str) -> types.Image:
+
+def fetch_image_bytes_from_s3(img: str) -> tuple[bytes, str]:
     bucket, key = parse_s3_uri_or_key(img)
     obj = s3_client.get_object(Bucket=bucket, Key=key)
     ctype = obj.get("ContentType") or "image/jpeg"
     data = obj["Body"].read()
-    return types.Image(image_bytes=data, mime_type=ctype)
+    return data, ctype
+
 
 def upload_video_to_s3(local_path: str, dest_bucket: str, dest_key: str) -> str:
     s3_resource.Bucket(dest_bucket).upload_file(
@@ -130,37 +142,71 @@ def upload_video_to_s3(local_path: str, dest_bucket: str, dest_key: str) -> str:
     )
     return url
 
+
 def post_callback(payload: dict):
     with httpx.Client(timeout=15) as cli:
         cli.post(CALLBACK_URL, json=payload)
 
+
 # -------------------
-# 생성 작업
+# 합성 + 영상 생성
 # -------------------
 def run_generation(job: GenIn):
     event_id = f"evt_{job.requestId}_{uuid.uuid4().hex[:6]}"
     prompt = job.veoPrompt
 
     try:
-        print(f"[{now_iso()}] === 영상 생성 요청 시작 ===", flush=True)
-        print(f"requestId={job.requestId}, jobId={job.jobId}, prompt={prompt}", flush=True)
-        print(f"img={job.img}", flush=True)
+        print(f"[{now_iso()}] === 작업 시작 ===", flush=True)
+        print(f"requestId={job.requestId}, jobId={job.jobId}", flush=True)
 
-        # 1) S3에서 이미지 로드
-        image_obj = fetch_image_from_s3(job.img or "")
-        print(f"[{now_iso()}] 이미지 로드 완료 (S3)", flush=True)
+        # 1) S3에서 이미지 2개 로드
+        img_bytes, ctype1 = fetch_image_bytes_from_s3(job.img)
+        mascot_bytes, ctype2 = fetch_image_bytes_from_s3(job.mascotimg)
+        print(f"[{now_iso()}] 이미지 2개 로드 완료", flush=True)
 
-        # 2) Veo 3 API 호출
+        # 2) 나노바나나(Gemini 2.5 Flash Image) API로 합성
+        # Part.from_bytes는 키워드 인자 사용 필수 (data=..., mime_type=...)
+        img_part    = types.Part.from_bytes(data=img_bytes,    mime_type=ctype1)
+        mascot_part = types.Part.from_bytes(data=mascot_bytes, mime_type=ctype2)
+
+        nb_prompt = (
+            "Create a new image by combining the mascot (second image) with the scene (first image). "
+            "Seamless compositing, realistic lighting, matching perspective, photorealistic."
+        )
+
+        nb_resp = client.models.generate_content(
+            model="gemini-2.5-flash-image-preview",
+            contents=[nb_prompt, img_part, mascot_part],
+        )
+
+        # 2-1) 합성 이미지 저장
+        merged_img_path = os.path.join(LOCAL_OUTPUT_DIR, f"{job.requestId}_merged.png")
+        saved = False
+        if nb_resp and nb_resp.candidates:
+            for part in nb_resp.candidates[0].content.parts:
+                if getattr(part, "inline_data", None) and part.inline_data.data:
+                    image = Image.open(BytesIO(part.inline_data.data))
+                    image.save(merged_img_path)
+                    saved = True
+                    break
+        if not saved:
+            raise RuntimeError("합성 이미지가 응답에 없습니다. 프롬프트/입력 이미지를 확인하세요.")
+        print(f"[{now_iso()}] 합성 이미지 생성 완료: {merged_img_path}", flush=True)
+
+        # 3) 합성 이미지를 Veo3 입력으로 사용 (Image-to-Video)
+        with open(merged_img_path, "rb") as f:
+            merged_bytes = f.read()
+        merged_image_obj = types.Image(image_bytes=merged_bytes, mime_type="image/png")
+
         operation = client.models.generate_videos(
             model=VEO3_MODEL,
             prompt=prompt,
-            image=image_obj,
+            image=merged_image_obj,
             config=build_video_config(),
         )
-        print(f"[{now_iso()}] generate_videos 호출 성공", flush=True)
-        print(f"operation 초기 상태: done={operation.done}", flush=True)
+        print(f"[{now_iso()}] Veo3 generate_videos 호출 성공. done={operation.done}", flush=True)
 
-        # 3) 완료까지 폴링
+        # 4) 완료까지 폴링
         while not operation.done:
             print(f"[{now_iso()}] 영상 생성 중... (polling)", flush=True)
             time.sleep(POLL_INTERVAL_S)
@@ -168,24 +214,21 @@ def run_generation(job: GenIn):
 
         print(f"[{now_iso()}] 영상 생성 완료", flush=True)
 
-        # 4) 비디오 다운로드
+        # 5) 비디오 다운로드
         video = operation.response.generated_videos[0]
         client.files.download(file=video.video)
-        print(f"[{now_iso()}] 비디오 다운로드 완료", flush=True)
 
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as fp:
             video.video.save(fp.name)
             tmp_path = fp.name
-        print(f"[{now_iso()}] 임시 파일 저장: {tmp_path}", flush=True)
 
-        # 5) 임시 → 로컬 이동
         local_name = f"{job.requestId}.mp4"
         local_path = os.path.join(LOCAL_OUTPUT_DIR, local_name)
         shutil.move(tmp_path, local_path)
         print(f"[{now_iso()}] 로컬 저장 완료: {local_path}", flush=True)
 
         # 6) S3 업로드
-        out_key = f"{S3_OUTPUT_PREFIX.rstrip('/')}/{job.requestId}.mp4" if S3_OUTPUT_PREFIX else f"{job.requestId}.mp4"
+        out_key = f"{S3_OUTPUT_PREFIX.rstrip('/')}/{local_name}" if S3_OUTPUT_PREFIX else local_name
         _presigned_url = upload_video_to_s3(local_path, S3_VIDEO_BUCKET, out_key)
         print(f"[{now_iso()}] S3 업로드 완료: s3://{S3_VIDEO_BUCKET}/{out_key}", flush=True)
 
@@ -198,7 +241,7 @@ def run_generation(job: GenIn):
             "type": "video",
             "resultKey": local_name,
             "status": "SUCCESS",
-            "message": "veo3 generation success",
+            "message": "veo3 generation success (with nanobanana fusion)",
             "createdAt": now_iso(),
         }
         post_callback(cb)
@@ -214,20 +257,19 @@ def run_generation(job: GenIn):
             "type": "video",
             "resultKey": "nothing",
             "status": "FAILED",
-            "message": f"veo3 generation failed: {e}",
+            "message": f"generation failed: {e}",
             "createdAt": now_iso(),
         }
         try:
             post_callback(cb)
-            print(f"[{now_iso()}] 실패 콜백 전송 완료", flush=True)
         except Exception as e2:
-            print(f"[{now_iso()}] 실패 콜백 전송 실패: {e2}", flush=True)
+            print(f"콜백 실패: {e2}", flush=True)
+
 
 # 엔드포인트
 @app.post("/api/veo3-generate")
 def veo3_generate(body: GenIn, bg: BackgroundTasks):
     if not body.veoPrompt or not body.requestId:
         raise HTTPException(status_code=400, detail="invalid payload")
-
     bg.add_task(run_generation, body)
     return {"accepted": True, "requestId": body.requestId, "model": VEO3_MODEL, "type": "veo3"}
