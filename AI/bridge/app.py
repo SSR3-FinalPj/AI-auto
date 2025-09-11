@@ -1,3 +1,6 @@
+import os, sys
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+
 import os, json, time, hmac, hashlib, threading, queue, uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict
@@ -10,9 +13,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
-from llm_client import summarize_to_english, summarize_top3_text, extract_keyword, veoprompt_generate
+from bridge.llm_client import summarize_to_english, summarize_top3_text, extract_keyword, veoprompt_generate
 from dotenv import load_dotenv
-from models import Weather, BridgeIn, Envelope, VeoBridge
+from bridge.models import Weather, BridgeIn, Envelope, VeoBridge
 load_dotenv()
 
 # -------------------
