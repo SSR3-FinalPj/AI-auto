@@ -29,7 +29,8 @@ NEGATIVE_PROMPT  = os.getenv("VEO3_NEGATIVE_PROMPT", "")
 POLL_INTERVAL_S  = int(os.getenv("VEO3_POLL_INTERVAL_S", "5"))
 
 # Bridge 콜백
-CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8000/api/video/callback")
+#CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8000/api/video/callback")
+CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8001/api/video/callback")
 
 # S3 in/out
 S3_REGION        = os.getenv("S3_REGION", "")
