@@ -19,4 +19,4 @@ COPY . .
 
 EXPOSE 8000 9001
 
-CMD [ "uvicorn", "AI.auto.video_api_system.bridge.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD [ "uvicorn", "AI.bridge.app:app", "--host", "0.0.0.0", "--port", "8000"]
