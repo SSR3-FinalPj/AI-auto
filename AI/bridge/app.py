@@ -236,7 +236,7 @@ app = FastAPI(title="Bridge Server", lifespan=lifespan)
 # -------------------
 # Endpoints
 # -------------------
-@app.post("/api/generate-video")
+@app.post("/api/generate-media")
 def enqueue_generate_video(
     payload: BridgeIn,
     idem_key: Optional[str] = Header(default=None, alias="Idempotency-Key")
@@ -415,7 +415,7 @@ async def enqueue_veo3_generate(
 
 
 #video callback api -------------------------------------------
-@app.post("/api/video/callback")
+@app.post("/api/media/callback")
 async def generator_callback(request: Request):
     raw = await request.body()
     try:

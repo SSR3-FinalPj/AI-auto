@@ -15,7 +15,7 @@ from pydantic import BaseModel
 COMFY_BASE_URL       = os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188")
 WORKFLOW_YT_PATH     = Path(os.getenv("WORKFLOW_YT_PATH", "./youtube_video.json")).resolve()
 WORKFLOW_REDDIT_PATH = Path(os.getenv("WORKFLOW_REDDIT_PATH", "./reddit_image.json")).resolve()
-BRIDGE_CALLBACK_URL  = os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8001/api/video/callback")
+BRIDGE_CALLBACK_URL  = os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8001/api/media/callback")
 #BRIDGE_CALLBACK_URL  = os.getenv("BRIDGE_CALLBACK_URL", "http://127.0.0.1:8000/api/video/callback")
 POLL_INTERVAL        = float(os.getenv("POLL_INTERVAL", "2.0"))
 
