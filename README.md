@@ -2,27 +2,49 @@
 
 ## 폴더 구조
 AI-auto/
+
 ├── AI/
+
 │   ├── AI/
+
 │   │   ├── prompt/                 # 영상생성 관련 서버/워크플로우
+
 │   │   │   ├── generator_server.py
+
 │   │   │   ├── veo3_server.py
+
 │   │   │   ├── reddit_image.json   # 워크플로우 JSON
+
 │   │   │   ├── youtube_video.json  # 워크플로우 JSON
+
 │   │   │   ├── Dockerfile
+
 │   │   │   └── requirements.txt
+
 │   │   └── docker-compose.yml
+
 │   └── auto/
+
 │       └── video_api_system/       # 브리지 서버 API 시스템
+
 │           ├── docker-compose.yml
+
 │           └── bridge/
+
 │               ├── app.py
+
 │               ├── llm_client.py
+
 │               ├── models.py
+
 │               ├── push_image.sh
+
 │               ├── Dockerfile
+
 │               └── requirements.txt
+
 ├── .gitignore
+
 └── README.md
 
 ## 프로젝트 개요
@@ -56,6 +78,6 @@ AI/ML: OpenAI / Groq LLM API, ComfyUI 워크플로우
 pip install fastapi "uvicorn[standard]" httpx "pydantic>=2"
 
 #### 실행
-py -m uvicorn app:app --port 8000 --reload
+py -m uvicorn app:app --port 8001 --reload
 py -m uvicorn generator_server:app --port 9001 --reload (comfyui)
 py -m uvicorn veo3_server:app --port 9001 --reload (veo3)
