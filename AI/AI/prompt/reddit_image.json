@@ -6,7 +6,7 @@
       "cfg": 7,
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
-      "denoise": 0.7500000000000001,
+      "denoise": 0.7000000000000002,
       "model": [
         "11",
         0
@@ -82,7 +82,7 @@
   },
   "9": {
     "inputs": {
-      "filename_prefix": "Youtube_image",
+      "filename_prefix": "Reddit",
       "images": [
         "8",
         0
@@ -96,8 +96,8 @@
   "11": {
     "inputs": {
       "lora_name": "blindbox_v1_mix.safetensors",
-      "strength_model": 0.7500000000000001,
-      "strength_clip": 1.0000000000000002,
+      "strength_model": 0.75,
+      "strength_clip": 1,
       "model": [
         "4",
         0
@@ -135,6 +135,19 @@
     "class_type": "LoadImageS3",
     "_meta": {
       "title": "Load Image from S3"
+    }
+  },
+  "21": {
+    "inputs": {
+      "filename_prefix": "Reddit",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImageS3",
+    "_meta": {
+      "title": "Save Image to S3"
     }
   }
 }
