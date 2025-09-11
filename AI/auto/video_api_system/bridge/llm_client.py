@@ -451,9 +451,8 @@ async def veoprompt_generate(payload: Dict[str, Any]) -> str:
         wt = (Di.get("weather") or {})
 
         json_payload = {
-            "user":Di,
-            "element":be,
-            "beforeprompt":wt
+            "beforeprompt":be,
+            "weather":wt
         }
 
         req = {"contents": [{"role":"user","parts":[{"text":VEO}]},

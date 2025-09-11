@@ -37,8 +37,8 @@ class VeoBridge(BaseModel):
     jobId: int
     platform: str
     isclient: bool = False
-    weather: Optional[Weather]
+    weather: Weather | None = None   
     beforeprompt: Optional[str] = None 
     user: Optional[str] = None
-    element: Optional[Dict[str, Any]]
+    element: Optional[Dict[str, Any]] = None
 
