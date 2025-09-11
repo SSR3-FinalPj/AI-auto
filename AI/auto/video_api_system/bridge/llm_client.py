@@ -177,6 +177,35 @@ VEO = ("""
 [Weather(Only if data exists)]
 3. "날씨 데이터를 단어 형태로 한 줄로 작성하세요."
 
+[출력 형식 : JSON 형태의 text로 전송]
+{
+    "element":{
+        "subject":"string|null"
+        "Action":"string|null"
+        "Style":"string|null"
+        "Camera positioning and motion":"string|null"
+        "Composition":"string|null"
+        "Focus and lens effects":"string|null"
+        "Ambiance":"string|null"
+       }
+    "weather": {
+ 		"areaName":"string|null",
+ 		"temperature":"string|null",
+ 		"humidity": "string|null",
+        "uvIndex": "string|null",
+        "congestionLevel": "string|null",
+        "maleRate": "string|null",
+        "femaleRate": "string|null",
+        "teenRate": "string|null",
+        "twentyRate": "string|null",
+        "thirtyRate": "string|null",
+        "fortyRate": "string|null",
+        "fiftyRate": "string|null",
+        "sixtyRate": "string|null",
+        "seventyRate": "string|null"
+    }
+}
+
 
 
 """).strip()
@@ -363,12 +392,10 @@ async def extract_keyword(input: Dict[str, Any]) -> dict:
     inp = dict(input) if input else {}
     user = (inp.get("user") or {})
     el = (inp.get("element") or {})
-    be = (inp.get("beforeprompt") or {})
 
     json_payload = {
         "user":user,
-        "element":el,
-        "beforeprompt":be
+        "element":el
     }
     
     req = {
@@ -418,8 +445,21 @@ async def veoprompt_generate(payload: Dict[str, Any]) -> str:
 
     extract = await extract_keyword(payload)
     if extract != None:
+
+        Di = dict(payload) if payload else {}
+        be = (Di.get("beforeprompt") or {})
+        wt = (Di.get("weather") or {})
+
+        json_payload = {
+            "user":Di,
+            "element":be,
+            "beforeprompt":wt
+        }
+
         req = {"contents": [{"role":"user","parts":[{"text":VEO}]},
-                            {"role":"user","parts":[{"text":json.dumps(extract, ensure_ascii=False)}]}]}
+                            {"role":"user","parts":[{"text":json.dumps(extract, ensure_ascii=False)}]},
+                            {"role":"user","parts":[{"text":json.dumps(json_payload, ensure_ascii=False)}]}
+                            ]}
 
         last_err: Optional[Exception] = None
         for i in range(3):
