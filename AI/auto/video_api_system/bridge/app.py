@@ -384,6 +384,7 @@ async def enqueue_veo3_generate(
                 "jobId": job["jobId"],
                 "platform": job.get("platform"),
                 "img": job.get("img"),
+                "mascotimg": job.get("img"),
                 "isclient": True,
                 "veoPrompt": veoprompt,
             }
@@ -405,7 +406,7 @@ async def enqueue_veo3_generate(
 
     # 3) 클라이언트에 먼저 응답
     return JSONResponse(
-        {"requestId": req_id, "extracted": extracted, "direct": True},
+        {"requestId": req_id, "extracted": extracted},
         status_code=202
     )
 
