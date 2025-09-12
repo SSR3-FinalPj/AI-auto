@@ -1,21 +1,21 @@
 import os, sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
-import os, json, time, hmac, hashlib, threading, queue, uuid
+import os, json, time, hmac, hashlib, threading, uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict
 from queue import PriorityQueue
 
 import httpx
 import asyncio
-from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from confluent_kafka import Producer
 from contextlib import asynccontextmanager
 from bridge.llm_client import summarize_to_english, summarize_top3_text, extract_keyword, veoprompt_generate
 from dotenv import load_dotenv
-from bridge.models import Weather, BridgeIn, Envelope, VeoBridge
+from bridge.models import BridgeIn, VeoBridge
 load_dotenv()
 
 # -------------------
@@ -310,12 +310,6 @@ def enqueue_generate_video(
                     raise RuntimeError("GENERATOR_ENDPOINT is not set")
                 r = cli.post(GENERATOR_ENDPOINT, json=gen_body)
                 r.raise_for_status()
-
-            # if SERIALIZE_BY_CALLBACK:
-            #     ok = done_evt.wait(timeout=TTL_SECONDS)
-            #     if not ok:
-            #         with lock:
-            #             inflight.pop(req_id, None)
 
             return JSONResponse({"requestId": req_id, "enqueued": False, "direct": True}, status_code=202)
 
