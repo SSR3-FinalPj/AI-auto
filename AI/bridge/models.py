@@ -43,4 +43,3 @@ class VeoBridge(BaseModel):
     user: Optional[str] = None
     element: Optional[Dict[str, Any]] = None
     sample: Optional[Dict[str, Any]] = None
-

@@ -13,10 +13,11 @@ services:
       - WORKFLOW_REDDIT_PATH=/app/reddit_image.json
       - BRIDGE_CALLBACK_URL=http://host.docker.internal:8001/api/media/callback
       - POLL_INTERVAL=2.0
-      - OUTPUT_DIR=/app/output   # 컨테이너 안에서 output 폴더 경로
+      - OUTPUT_DIR=/app/output
+      - LOCAL_OUTPUT_DIR=/app/output
     volumes:
       - ./youtube_video.json:/app/youtube_video.json
       - ./reddit_image.json:/app/reddit_image.json
-      - D:/ComfyUI/ComfyUI/output:/app/output   # 로컬 output 폴더 공유
+      - ./output:/app/output   # output 폴더 로컬-컨테이너 공유
     ports:
       - "19001:9001"
