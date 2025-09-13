@@ -25,14 +25,14 @@ load_dotenv()
 # Gemini / Veo3
 GEMINI_API_KEY   = os.getenv("GEMINI_API_KEY", "")
 VEO3_MODEL       = os.getenv("VEO3_MODEL", "veo-3.0-generate-001")
-ASPECT_RATIO     = os.getenv("VEO3_ASPECT_RATIO", "16:9")
-RESOLUTION       = os.getenv("VEO3_RESOLUTION", "1080p")
+ASPECT_RATIO     = os.getenv("VEO3_ASPECT_RATIO", "")
+RESOLUTION       = os.getenv("VEO3_RESOLUTION", "")
 PERSON_GEN       = os.getenv("VEO3_PERSON_GENERATION", "allow_adult")
 NEGATIVE_PROMPT  = os.getenv("VEO3_NEGATIVE_PROMPT", "")
 POLL_INTERVAL_S  = int(os.getenv("VEO3_POLL_INTERVAL_S", "5"))
 
 # Bridge 콜백
-CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8000/api/video/callback")
+CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "http://localhost:8001/api/video/callback")
 
 # S3 in/out
 S3_REGION        = os.getenv("S3_REGION", "")
@@ -71,7 +71,7 @@ class GenIn(BaseModel):
     jobId: int | str
     platform: Optional[str] = None
     img: str           # 첫 번째 이미지 (예: 배경)
-    mascotimg: str     # 두 번째 이미지 (예: 마스코트)
+    mascotImg: str     # 두 번째 이미지 (예: 마스코트)
     isclient: Optional[bool] = None
     veoPrompt: str     # 최종 영상 제작 프롬프트
 
@@ -161,7 +161,7 @@ def run_generation(job: GenIn):
 
         # 1) S3에서 이미지 2개 로드
         img_bytes, ctype1 = fetch_image_bytes_from_s3(job.img)
-        mascot_bytes, ctype2 = fetch_image_bytes_from_s3(job.mascotimg)
+        mascot_bytes, ctype2 = fetch_image_bytes_from_s3(job.mascotImg)
         print(f"[{now_iso()}] 이미지 2개 로드 완료", flush=True)
 
         # 2) 나노바나나(Gemini 2.5 Flash Image) API로 합성
@@ -170,9 +170,13 @@ def run_generation(job: GenIn):
         mascot_part = types.Part.from_bytes(data=mascot_bytes, mime_type=ctype2)
 
         nb_prompt = (
-            "Create a new image by combining the mascot (second image) with the scene (first image). "
-            "Seamless compositing, realistic lighting, matching perspective, photorealistic."
+            "Place the mascot from the second image clearly off to the side, positioned deep in a corner of the background from the first image. "
+            "Do not render the mascot as a child. Make it look like a stylized mascot character, cartoon-like, not a real human. "
+            "Photorealistic blending with the background scene, strong 3D feel, consistent lighting and color temperature, correct perspective, "
+            "and grounded contact shadows. "
+            "Scale the mascot to approximately adult human size so it fits the scene believably."
         )
+
 
         nb_resp = client.models.generate_content(
             model="gemini-2.5-flash-image-preview",
@@ -182,15 +186,19 @@ def run_generation(job: GenIn):
         # 2-1) 합성 이미지 저장
         merged_img_path = os.path.join(LOCAL_OUTPUT_DIR, f"{job.requestId}_merged.png")
         saved = False
+        
         if nb_resp and nb_resp.candidates:
-            for part in nb_resp.candidates[0].content.parts:
-                if getattr(part, "inline_data", None) and part.inline_data.data:
-                    image = Image.open(BytesIO(part.inline_data.data))
-                    image.save(merged_img_path)
-                    saved = True
-                    break
+            candidate = nb_resp.candidates[0]
+            if candidate and getattr(candidate, "content", None):
+                for part in nb_resp.candidates[0].content.parts:
+                    if getattr(part, "inline_data", None) and part.inline_data.data:
+                        image = Image.open(BytesIO(part.inline_data.data))
+                        image.save(merged_img_path)
+                        saved = True
+                        break
+                        
         if not saved:
-            raise RuntimeError("합성 이미지가 응답에 없습니다. 프롬프트/입력 이미지를 확인하세요.")
+            raise RuntimeError(f"합성 이미지가 응답에 없습니다. 응답 내용: {nb_resp}")
         print(f"[{now_iso()}] 합성 이미지 생성 완료: {merged_img_path}", flush=True)
 
         # 3) 합성 이미지를 Veo3 입력으로 사용 (Image-to-Video)
@@ -215,7 +223,15 @@ def run_generation(job: GenIn):
         print(f"[{now_iso()}] 영상 생성 완료", flush=True)
 
         # 5) 비디오 다운로드
-        video = operation.response.generated_videos[0]
+        resp = getattr(operation, "response", None)
+        if not resp or not getattr(resp, "generated_videos", None):
+            raise RuntimeError(f"Veo3 응답에 generated_videos가 없습니다. 전체 응답: {operation}")
+
+        videos = resp.generated_videos
+        if len(videos) == 0 or videos[0] is None:
+            raise RuntimeError(f"Veo3 응답에 유효한 video 객체가 없습니다. 전체 응답: {operation}")
+
+        video = videos[0]
         client.files.download(file=video.video)
 
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as fp:
@@ -226,6 +242,7 @@ def run_generation(job: GenIn):
         local_path = os.path.join(LOCAL_OUTPUT_DIR, local_name)
         shutil.move(tmp_path, local_path)
         print(f"[{now_iso()}] 로컬 저장 완료: {local_path}", flush=True)
+
 
         # 6) S3 업로드
         out_key = f"{S3_OUTPUT_PREFIX.rstrip('/')}/{local_name}" if S3_OUTPUT_PREFIX else local_name

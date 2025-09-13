@@ -384,7 +384,7 @@ async def enqueue_veo3_generate(
                 "jobId": job["jobId"],
                 "platform": job.get("platform"),
                 "img": job.get("img"),
-                "mascotimg": job.get("img"),
+                "mascotImg": job.get("mascotImg"),
                 "isclient": True,
                 "veoPrompt": veoprompt,
             }
