@@ -34,7 +34,7 @@ class Envelope(BaseModel):
 
 class VeoBridge(BaseModel):
     img: str
-    mascotimg: str = None
+    mascotImg: str = None
     jobId: int
     platform: str
     isclient: bool = False
@@ -43,4 +43,3 @@ class VeoBridge(BaseModel):
     user: Optional[str] = None
     element: Optional[Dict[str, Any]] = None
     sample: Optional[Dict[str, Any]] = None
-

@@ -494,5 +494,3 @@ async def veoprompt_generate(payload: Dict[str, Any]) -> str:
                     time.sleep(0.6 * (i + 1))
                 else:
                     raise RuntimeError(f"Gemini REST failed: {e}") from e
-                
-
