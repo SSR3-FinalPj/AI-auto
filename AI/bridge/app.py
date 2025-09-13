@@ -23,9 +23,9 @@ load_dotenv()
 # -------------------
 GENERATOR_ENDPOINT = os.getenv("GENERATOR_ENDPOINT")
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP")
-KAFKA_TOPIC      = os.getenv("KAFKA_TOPIC", "video-callback")
-TTL_SECONDS      = int(os.getenv("TTL_SECONDS", "86400"))
-WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "1"))
+KAFKA_TOPIC      = os.getenv("KAFKA_TOPIC", "media-callback")
+TTL_SECONDS      = int(os.getenv("TTL_SECONDS", ""))
+WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", ""))
 SERIALIZE_BY_CALLBACK = True
 
 print("GENERATOR_ENDPOINT =", GENERATOR_ENDPOINT)
