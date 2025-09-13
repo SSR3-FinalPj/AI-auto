@@ -1,6 +1,7 @@
 # AI-Auto
 
 ## 폴더 구조
+```
 AI-auto/
 ├── AI/
 │   ├── AI/
@@ -24,6 +25,7 @@ AI-auto/
 │               └── requirements.txt
 ├── .gitignore
 └── README.md
+```
 
 ## 프로젝트 개요
 AI-Auto는 AI 모델과 자동화 파이프라인을 활용해 이미지/영상 생성 및 처리 작업을 자동화하는 리포지토리 입니다.
