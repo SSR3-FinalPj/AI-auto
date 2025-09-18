@@ -38,7 +38,7 @@ class GenInComfy(BaseModel):
     img: str
     englishText: Optional[str] = ""
     platform: str   # youtube | reddit
-    isclient: Optional[bool] = False  
+    isclient: Optional[bool] = False
 
 async def _submit_to_comfy(patched_workflow: Dict[str, Any]) -> str:
     client_id = uuid.uuid4().hex
@@ -124,7 +124,7 @@ ASPECT_RATIO     = os.getenv("VEO3_ASPECT_RATIO", "")
 RESOLUTION       = os.getenv("VEO3_RESOLUTION", "")
 PERSON_GEN       = os.getenv("VEO3_PERSON_GENERATION", "")
 NEGATIVE_PROMPT  = os.getenv("VEO3_NEGATIVE_PROMPT", "")
-VEO3_POLL_SEC    = int(os.getenv("VEO3_POLL_INTERVAL_S", ""))
+VEO3_POLL_SEC    = int(os.getenv("VEO3_POLL_INTERVAL_S", "5"))
 
 CALLBACK_URL     = os.getenv("BRIDGE_CALLBACK_URL", "")
 
@@ -133,9 +133,9 @@ S3_IMAGE_BUCKET  = os.getenv("S3_IMAGE_BUCKET", "")
 S3_IMAGE_PREFIX  = os.getenv("S3_IMAGE_PREFIX", "")
 S3_VIDEO_BUCKET  = os.getenv("S3_VIDEO_BUCKET", "")
 S3_OUTPUT_PREFIX = os.getenv("S3_OUTPUT_PREFIX", "")
-PRESIGN_EXPIRE_S = int(os.getenv("S3_PRESIGN_EXPIRE_S", ""))
+PRESIGN_EXPIRE_S = int(os.getenv("S3_PRESIGN_EXPIRE_S", "3600"))
 
-LOCAL_OUTPUT_DIR = os.getenv("LOCAL_OUTPUT_DIR", "")
+LOCAL_OUTPUT_DIR = os.getenv("LOCAL_OUTPUT_DIR", "./output")
 os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
 
 if not GEMINI_API_KEY:
@@ -152,7 +152,7 @@ class GenInVeo(BaseModel):
     jobId: int | str
     platform: Optional[str] = None
     img: str
-    mascotImg: str   # ← 브리지 서버와 일치
+    mascotImg: Optional[str] = None  # ← null/"" 허용: 합성 생략 분기
     isclient: Optional[bool] = None
     veoPrompt: str
 
@@ -220,33 +220,48 @@ def run_generation(job: GenInVeo):
     prompt = job.veoPrompt
     try:
         print(f"[{now_iso()}] === 작업 시작 ===", flush=True)
+
+        # 항상 베이스 이미지는 로드
         img_bytes, ctype1 = fetch_image_bytes_from_s3(job.img)
-        mascot_bytes, ctype2 = fetch_image_bytes_from_s3(job.mascotImg)  # 수정됨
-        print(f"[{now_iso()}] 이미지 2개 로드 완료", flush=True)
 
-        img_part    = types.Part.from_bytes(data=img_bytes,    mime_type=ctype1)
-        mascot_part = types.Part.from_bytes(data=mascot_bytes, mime_type=ctype2)
+        # mascotImg 존재 여부로 합성 분기
+        use_fused = bool(job.mascotImg and str(job.mascotImg).strip())
+        if use_fused:
+            print(f"[{now_iso()}] 합성 모드: 베이스+마스코트 이미지", flush=True)
+            mascot_bytes, ctype2 = fetch_image_bytes_from_s3(job.mascotImg)  # 존재 가정
+            print(f"[{now_iso()}] 이미지 2개 로드 완료", flush=True)
 
-        nb_resp = client.models.generate_content(
-            model="gemini-2.5-flash-image-preview",
-            contents=["Create a new image by combining the mascot (second image) with the scene (first image). Seamless compositing.", img_part, mascot_part],
-        )
-        merged_img_path = os.path.join(LOCAL_OUTPUT_DIR, f"{job.requestId}_merged.png")
-        saved = False
-        if nb_resp and nb_resp.candidates:
-            for part in nb_resp.candidates[0].content.parts:
-                if getattr(part, "inline_data", None) and part.inline_data.data:
-                    image = Image.open(BytesIO(part.inline_data.data))
-                    image.save(merged_img_path)
-                    saved = True
-                    break
-        if not saved:
-            raise RuntimeError("합성 이미지 없음")
-        print(f"[{now_iso()}] 합성 이미지 생성 완료: {merged_img_path}", flush=True)
+            img_part    = types.Part.from_bytes(data=img_bytes,    mime_type=ctype1)
+            mascot_part = types.Part.from_bytes(data=mascot_bytes, mime_type=ctype2)
 
-        with open(merged_img_path, "rb") as f:
-            merged_bytes = f.read()
-        merged_image_obj = types.Image(image_bytes=merged_bytes, mime_type="image/png")
+            nb_resp = client.models.generate_content(
+                model="gemini-2.5-flash-image-preview",
+                contents=[
+                    "Create a new image by combining the mascot (second image) with the scene (first image). Seamless compositing.",
+                    img_part,
+                    mascot_part
+                ],
+            )
+            merged_img_path = os.path.join(LOCAL_OUTPUT_DIR, f"{job.requestId}_merged.png")
+            saved = False
+            if nb_resp and nb_resp.candidates:
+                for part in nb_resp.candidates[0].content.parts:
+                    if getattr(part, "inline_data", None) and part.inline_data.data:
+                        image = Image.open(BytesIO(part.inline_data.data))
+                        image.save(merged_img_path)
+                        saved = True
+                        break
+            if not saved:
+                raise RuntimeError("합성 이미지 없음")
+            print(f"[{now_iso()}] 합성 이미지 생성 완료: {merged_img_path}", flush=True)
+
+            with open(merged_img_path, "rb") as f:
+                merged_bytes = f.read()
+            merged_image_obj = types.Image(image_bytes=merged_bytes, mime_type="image/png")
+        else:
+            print(f"[{now_iso()}] 단일 이미지 모드: 합성 생략, 베이스 이미지로 바로 진행", flush=True)
+            merged_image_obj = types.Image(image_bytes=img_bytes, mime_type=ctype1)
+
         operation = client.models.generate_videos(
             model=VEO3_MODEL,
             prompt=prompt,
@@ -267,6 +282,7 @@ def run_generation(job: GenInVeo):
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as fp:
             video.video.save(fp.name)
             tmp_path = fp.name
+
         local_name = f"{job.requestId}.mp4"
         local_path = os.path.join(LOCAL_OUTPUT_DIR, local_name)
         shutil.move(tmp_path, local_path)
@@ -284,7 +300,8 @@ def run_generation(job: GenInVeo):
             "type": "video",
             "resultKey": local_name,
             "status": "SUCCESS",
-            "message": "veo3 generation success (with nanobanana fusion)",
+            "message": "veo3 generation success"
+                       + (" (with nanobanana fusion)" if use_fused else " (single image)"),
             "createdAt": now_iso(),
         }
         post_callback(cb)
