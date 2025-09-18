@@ -338,7 +338,7 @@ async def enqueue_veo3_generate(
 
     derived_key = idem_key or body_hash({
         "jobId": data["jobId"],
-        "weather": data["weather"],
+        "UUID": data.get("UUID"),
         "user": data.get("user")
     })
     with lock:
