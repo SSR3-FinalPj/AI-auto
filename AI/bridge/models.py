@@ -35,6 +35,7 @@ class Envelope(BaseModel):
 class VeoBridge(BaseModel):
     img: str
     mascotImg: Optional[str] = None
+    UUID: str
     jobId: int
     platform: str
     isclient: bool = False
