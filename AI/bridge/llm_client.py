@@ -174,41 +174,26 @@ VEO = ("""
 
 1번이 최우선순위, 그 다음 숫자로 갈수록 우선순위가 낮아집니다.
 [extract]
-1. "null값이 아닌 요소들을 단어 형태로 작성하세요"
+1. "null값이 아닌 요소들을 그대로 단어 형태로 작성하세요"
 2. "null값인 요소들을 sample의 요소로 채워넣으세요"
 3. "아직 null값인 요소들을 beforeprompt와 겹치지 않는 임의의 단어로 채워넣으세요."
 [Weather(Only if data exists)]
 1. "날씨 데이터를 작성하세요."
 
-[출력 형식 : JSON 형태의 text로 전송]
-{
-    "element":{
-        "subject":"string|null"
-        "Action":"string|null"
-        "Style":"string|null"
-        "Camera positioning and motion":"string|null"
-        "Composition":"string|null"
-        "Focus and lens effects":"string|null"
-        "Ambiance":"string|null"
-       }
-    "weather": {
- 		"areaName":"string|null",
- 		"temperature":"string|null",
- 		"humidity": "string|null",
-        "uvIndex": "string|null",
-        "congestionLevel": "string|null",
-        "maleRate": "string|null",
-        "femaleRate": "string|null",
-        "teenRate": "string|null",
-        "twentyRate": "string|null",
-        "thirtyRate": "string|null",
-        "fortyRate": "string|null",
-        "fiftyRate": "string|null",
-        "sixtyRate": "string|null",
-        "seventyRate": "string|null"
-    }
-}
+[출력 형식 : text로 전송]
 
+"element"
+"1. subject:(string|null)"
+"2. Action:(string|null)"
+"3. Style:(string|null)"
+"4. Camera positioning and motion:(string|null)"
+"5. Composition:(string|null)"
+"6. Focus and lens effects:(string|null)"
+"7. Ambiance:(string|null)"
+"weather"
+"1. areaName:(string|null), temperature:(string|null),humidity: (string|null), uvIndex: (string|null)"
+"2. congestionLevel: (string|null), maleRate: (string|null), femaleRate: (string|null)"
+"3. teenRate": (string|null), twentyRate:(string|null), thirtyRate: (string|null), fortyRate: (string|null), fiftyRate: (string|null), sixtyRate: (string|null),seventyRate: (string|null)
 
 
 """).strip()
