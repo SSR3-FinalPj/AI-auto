@@ -5,4 +5,4 @@ requests>=2.31
 pydantic>=2.6
 confluent-kafka>=2.4
 numpy>=2,<3
-
+google-genai
