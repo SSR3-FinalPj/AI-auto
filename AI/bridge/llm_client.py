@@ -4,6 +4,8 @@ import os, json, time
 from typing import Any, Dict, Optional
 import httpx
 from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 load_dotenv()
 
@@ -119,35 +121,61 @@ KEYWORD = ("""
 
 프롬프트 작성 기본사항
 유용한 프롬프트는 설명적이고 명확합니다. Veo를 최대한 활용하려면 먼저 핵심 아이디어를 파악하고, 키워드와 수정자를 추가하여 아이디어를 조정하고, 동영상 관련 용어를 프롬프트에 포함하세요.
-
-프롬프트에 다음 요소를 포함해야 합니다.
-
-1.주제: 동영상에 담고 싶은 사물, 사람, 동물 또는 풍경입니다(예: 도시 경관, 자연, 차량, 강아지).
-2.동작: 피사체가 하는 행동입니다 (예: 걷기, 달리기, 머리 돌리기).
-3.스타일: SF, 공포 영화, 필름 누아르 또는 만화와 같은 애니메이션 스타일 등 특정 영화 스타일 키워드를 사용하여 크리에이티브 방향을 지정합니다.
-4.카메라 위치 및 모션: [선택사항] 공중 촬영, 눈높이, 위에서 아래로 촬영, 돌리 샷, 로우 앵글과 같은 용어를 사용하여 카메라의 위치와 움직임을 제어합니다.
-5.구도: [선택사항] 와이드 샷, 클로즈업, 싱글 샷, 투 샷 등 촬영이 프레이밍되는 방식입니다.
-6.초점 및 렌즈 효과: [선택사항] 얕은 초점, 깊은 초점, 부드러운 초점, 매크로 렌즈, 광각 렌즈와 같은 용어를 사용하여 특정 시각 효과를 구현합니다.
-7.분위기: [선택사항] 색상과 조명이 장면에 기여하는 방식(예: 파란색 톤, 야간, 따뜻한 색조)입니다.
-프롬프트 작성을 위한 추가 도움말
-설명적인 언어 사용: 형용사와 부사를 사용하여 Veo에서 명확한 그림을 그릴 수 있도록 합니다.
-얼굴 세부정보 개선: 프롬프트에서 인물 사진이라는 단어를 사용하는 등 얼굴 세부정보를 사진의 초점으로 지정합니다.
+# Veo 프롬프트 구성 요소 설명
+## 1. `camera_motion` (카메라 움직임 / 촬영 기법)
+- 장면을 어떤 **카메라 앵글과 움직임**으로 담을지를 지정합니다.  
+- 예시:
+  - `Extreme Close-Up` → 피사체를 아주 가까이서 촬영 (눈, 손가락 같은 디테일 강조)  
+  - `Bird’s-Eye View` → 하늘에서 내려다보는 앵글  
+  - `Pan (left)` → 카메라가 왼쪽으로 부드럽게 움직임  
+  - `Dolly (In)` → 카메라가 피사체 쪽으로 다가옴 (줌과는 다름)  
+👉 즉, 영화적 장면에서 **카메라의 시선**을 컨트롤하는 요소예요.
+## 2. `subject_animation` (주제/인물 애니메이션)
+- 이미지 속 **주인공(사람, 동물, 물체 등)**이 어떤 식으로 미세하게 움직이는지 지정합니다.  
+- 예시:
+  - `"None"` → 정적인 상태  
+  - `"The subject's head turns slowly"` → 피사체가 천천히 고개를 돌림  
+  - `"The subject blinks slowly"` → 천천히 눈을 깜박임  
+  - `"The subject's hair and clothes flutter gently in the wind"` → 바람에 의해 머리카락/옷이 살짝 흔들림  
+👉 즉, 정지 이미지를 약간의 **생동감**을 주는 연출이에요.
+## 3. `environmental_animation` (환경 애니메이션)
+- 배경이나 주위 환경에서 일어나는 **움직임/변화**를 설정합니다.  
+- 예시:
+  - `"Fog rolls in slowly"` → 안개가 천천히 깔림  
+  - `"Rain starts to fall gently"` → 빗방울이 잔잔하게 떨어짐  
+  - `"Leaves rustle in the wind"` → 바람에 나뭇잎이 흔들림  
+  - `"Light changes subtly"` → 조명이 부드럽게 변함  
+👉 즉, 장면을 더 **영화적이고 몰입감 있게** 만드는 효과예요.
+## 4. `sound_effects` (사운드 효과)
+- 장면에 맞는 **소리/배경음**을 추가합니다.  
+- 예시:
+  - `"Sound of a phone ringing"` → 전화 벨 소리  
+  - `"Waves crashing"` → 파도 부딪히는 소리  
+  - `"Ticking clock"` → 시계 초침 소리  
+  - `"Quiet office hum"` → 사무실의 잔잔한 소음  
+👉 즉, 시각뿐 아니라 **청각적 분위기까지 보강**해주는 옵션이에요.
+## 5. `dialogue` (대사 / 대화)
+- 장면 속 인물이나 내레이션이 말하는 **대사**를 직접 지정합니다.  
+- 사용자가 문자열을 입력하면 프롬프트에 대사가 포함되어, 인물이 말하거나 화면에 자막처럼 나타나는 효과를 줄 수 있습니다.  
+- 예시:
+  - `"We have to leave now."` → 인물이 긴박하게 말하는 대사  
+  - `"Welcome to the future."` → 내레이션 혹은 자막 같은 효과  
+👉 즉, 장면에 **스토리와 감정**을 더하는 요소예요.
 
 [1번 요구사항을 최우선순위로 두고 출력 형식을 채우세요.]
 1.user가 요구하는 내용이 프롬프트 요소 중 1번부터 7번까지 어디에 포함되는지 분석해서 출력 형식에 삽입하세요.(한개 이상 선택하여 입력된 내용의 키워드를 적으세요.)
-2.출력 형식의 null 값 중에 element의 null값이 아닌 내용이 있다면 채우세요. 
+2.출력 형식의 null 값 중에 element에 null값이 아닌 내용이 있다면 채우세요.
 [반드시 지킬 것]
 - user가 요구하는 내용을 추론 없이, 단어나 문자를 추가하지 말고 작성하세요.
            
 [출력 형식]
 {
-    "subject":"string|null"
-    "Action":"string|null"
-    "Style":"string|null"
-    "Camera positioning and motion":"string|null"
-    "Composition":"string|null"
-    "Focus and lens effects":"string|null"
-    "Ambiance":"string|null"
+    "camera_motion":"string|null"
+    "subject_animation":"string|null"
+    "environmental_animation":"string|null"
+    "sound_effects":"string|null"
+    "dialogue":"string|null"
+    "beforeprompt":"string|null"
 }
 
 """).strip()
@@ -158,19 +186,46 @@ VEO = ("""
 
 프롬프트 작성 기본사항
 유용한 프롬프트는 설명적이고 명확합니다. Veo를 최대한 활용하려면 먼저 핵심 아이디어를 파악하고, 키워드와 수정자를 추가하여 아이디어를 조정하고, 동영상 관련 용어를 프롬프트에 포함하세요.
-
-프롬프트에 다음 요소를 포함해야 합니다.
-
-1.주제: 동영상에 담고 싶은 사물, 사람, 동물 또는 풍경입니다(예: 도시 경관, 자연, 차량, 강아지).
-2.동작: 피사체가 하는 행동입니다 (예: 걷기, 달리기, 머리 돌리기).
-3.스타일: SF, 공포 영화, 필름 누아르 또는 만화와 같은 애니메이션 스타일 등 특정 영화 스타일 키워드를 사용하여 크리에이티브 방향을 지정합니다.
-4.카메라 위치 및 모션: [선택사항] 공중 촬영, 눈높이, 위에서 아래로 촬영, 돌리 샷, 로우 앵글과 같은 용어를 사용하여 카메라의 위치와 움직임을 제어합니다.
-5.구도: [선택사항] 와이드 샷, 클로즈업, 싱글 샷, 투 샷 등 촬영이 프레이밍되는 방식입니다.
-6.초점 및 렌즈 효과: [선택사항] 얕은 초점, 깊은 초점, 부드러운 초점, 매크로 렌즈, 광각 렌즈와 같은 용어를 사용하여 특정 시각 효과를 구현합니다.
-7.분위기: [선택사항] 색상과 조명이 장면에 기여하는 방식(예: 파란색 톤, 야간, 따뜻한 색조)입니다.
-프롬프트 작성을 위한 추가 도움말
-설명적인 언어 사용: 형용사와 부사를 사용하여 Veo에서 명확한 그림을 그릴 수 있도록 합니다.
-얼굴 세부정보 개선: 프롬프트에서 인물 사진이라는 단어를 사용하는 등 얼굴 세부정보를 사진의 초점으로 지정합니다.
+# Veo 프롬프트 구성 요소 설명
+## 1. `camera_motion` (카메라 움직임 / 촬영 기법)
+- 장면을 어떤 **카메라 앵글과 움직임**으로 담을지를 지정합니다.  
+- 예시:
+  - `Extreme Close-Up` → 피사체를 아주 가까이서 촬영 (눈, 손가락 같은 디테일 강조)  
+  - `Bird’s-Eye View` → 하늘에서 내려다보는 앵글  
+  - `Pan (left)` → 카메라가 왼쪽으로 부드럽게 움직임  
+  - `Dolly (In)` → 카메라가 피사체 쪽으로 다가옴 (줌과는 다름)  
+👉 즉, 영화적 장면에서 **카메라의 시선**을 컨트롤하는 요소예요.
+## 2. `subject_animation` (주제/인물 애니메이션)
+- 이미지 속 **주인공(사람, 동물, 물체 등)**이 어떤 식으로 미세하게 움직이는지 지정합니다.  
+- 예시:
+  - `"None"` → 정적인 상태  
+  - `"The subject's head turns slowly"` → 피사체가 천천히 고개를 돌림  
+  - `"The subject blinks slowly"` → 천천히 눈을 깜박임  
+  - `"The subject's hair and clothes flutter gently in the wind"` → 바람에 의해 머리카락/옷이 살짝 흔들림  
+👉 즉, 정지 이미지를 약간의 **생동감**을 주는 연출이에요.
+## 3. `environmental_animation` (환경 애니메이션)
+- 배경이나 주위 환경에서 일어나는 **움직임/변화**를 설정합니다.  
+- 예시:
+  - `"Fog rolls in slowly"` → 안개가 천천히 깔림  
+  - `"Rain starts to fall gently"` → 빗방울이 잔잔하게 떨어짐  
+  - `"Leaves rustle in the wind"` → 바람에 나뭇잎이 흔들림  
+  - `"Light changes subtly"` → 조명이 부드럽게 변함  
+👉 즉, 장면을 더 **영화적이고 몰입감 있게** 만드는 효과예요.
+## 4. `sound_effects` (사운드 효과)
+- 장면에 맞는 **소리/배경음**을 추가합니다.  
+- 예시:
+  - `"Sound of a phone ringing"` → 전화 벨 소리  
+  - `"Waves crashing"` → 파도 부딪히는 소리  
+  - `"Ticking clock"` → 시계 초침 소리  
+  - `"Quiet office hum"` → 사무실의 잔잔한 소음  
+👉 즉, 시각뿐 아니라 **청각적 분위기까지 보강**해주는 옵션이에요.
+## 5. `dialogue` (대사 / 대화)
+- 장면 속 인물이나 내레이션이 말하는 **대사**를 직접 지정합니다.  
+- 사용자가 문자열을 입력하면 프롬프트에 대사가 포함되어, 인물이 말하거나 화면에 자막처럼 나타나는 효과를 줄 수 있습니다.  
+- 예시:
+  - `"We have to leave now."` → 인물이 긴박하게 말하는 대사  
+  - `"Welcome to the future."` → 내레이션 혹은 자막 같은 효과  
+👉 즉, 장면에 **스토리와 감정**을 더하는 요소예요.
 
 1번이 최우선순위, 그 다음 숫자로 갈수록 우선순위가 낮아집니다.
 [extract]
@@ -380,10 +435,12 @@ async def extract_keyword(input: Dict[str, Any]) -> dict:
     inp = dict(input) if input else {}
     user = (inp.get("user") or {})
     el = (inp.get("element") or {})
+    be = (inp.get("beforeprompt") or {})
 
     json_payload = {
         "user":user,
-        "element":el
+        "element":el,
+        "beforeprompt":be
     }
     
     req = {
@@ -405,8 +462,8 @@ async def extract_keyword(input: Dict[str, Any]) -> dict:
             text  = " ".join(text.split()).strip()
             if not text:
                 raise RuntimeError("Empty response from Gemini REST")
+            break
         except Exception as e:
-            last_err = e
             if i < 2:
                 time.sleep(0.6*(i+1))
             else:
@@ -415,67 +472,186 @@ async def extract_keyword(input: Dict[str, Any]) -> dict:
     # 2) JSON 추출 시도
     text = (text or "").strip().strip("`").strip()
     start, end = text.find("{"), text.rfind("}")
-    data = None
+    parsed = {}
     if start != -1 and end != -1 and end > start:
         try:
-            data = json.loads(text[start:end+1])
+            parsed = json.loads(text[start:end+1])
         except Exception:
-            data = None
+            parsed = {}
 
-    # 3) 정상 응답이면 키 보정 + 숫자 문자열화 + video_id 보강
-    if data and isinstance(data, dict):
-        return data
+    keys = ["camera_motion","subject_animation","environmental_animation","sound_effects","dialogue","beforeprompt"]
+    return {k: (parsed.get(k) if isinstance(parsed.get(k), str) and parsed.get(k).strip() else "null") for k in keys}
+
+def _guess_mime_from_name(name: str) -> str:
+    n = (name or "").lower()
+    if n.endswith(".png"):  return "image/png"
+    if n.endswith(".jpg") or n.endswith(".jpeg"): return "image/jpeg"
+    if n.endswith(".webp"): return "image/webp"
+    if n.endswith(".gif"):  return "image/gif"
+    return "application/octet-stream"
 
 async def veoprompt_generate(payload: Dict[str, Any]) -> str:
     api_key = _get_api_key()
     model   = _model_name()
+
+    Di = dict(payload) if payload else {}
+    extract = Di.get("_extracted")
+    if extract is None:
+        extract = await extract_keyword(Di)
+
+    if not isinstance(extract, dict):
+        extract = {}
+
+    def _s(x):  # stringifier
+        return str(x) if x is not None else ""
+
+    # weather/sample/beforeprompt 문자열화(키워드로 쓸 때만 간단 요약)
+    def _compact(obj):
+        if obj is None:
+            return ""
+        if isinstance(obj, (str, int, float)):
+            return _s(obj)
+        if isinstance(obj, dict):
+            # 중요한 값만 간단히 합치기
+            # 예: {"areaName":"용산","temperature":"23","uvIndex":"3"} → "용산 23 3"
+            vals = [str(v) for v in obj.values() if isinstance(v, (str,int,float)) and str(v).strip()]
+            return " ".join(vals)[:200]
+        if isinstance(obj, list):
+            vals = [str(v) for v in obj if isinstance(v, (str,int,float)) and str(v).strip()]
+            return " ".join(vals)[:200]
+        return ""
+
+    before_prompt = _compact(Di.get("beforeprompt"))
+    weather_compact = _compact(Di.get("weather"))
+    sample_compact  = _compact(Di.get("sample"))
+
+
+    camera_motion = _s(extract.get("camera_motion")).strip() or "" 
+
+    subject_animation = _s(extract.get("subject_animation")).strip() or "" 
+    environmental_animation = _s(extract.get("environmental_animation")).strip() or "" 
+
+    sound_effects = _s(extract.get("sound_effects")).strip() or "" 
+    dialogue = _s(extract.get("dialogue")).strip() or "" 
+
+    starting_image = _s(Di.get("img")).strip() or ""
+
+    prompt = ""
+
+    keywords = []
+    optional_keywords = [
+        camera_motion,
+        subject_animation,
+        environmental_animation,
+        sound_effects,
+        weather_compact,
+        sample_compact,
+        before_prompt
+    ]
+    for keyword in optional_keywords:
+        if keyword != "None":
+            keywords.append(keyword)
+    if dialogue != "":
+        keywords.append(dialogue)
+
+    # 2) 이미지가 있으면: SDK로 이미지+키워드 기반 프롬프트 생성 시도
+    if starting_image:
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=api_key)
+            mime = _guess_mime_from_name(starting_image)
+            with open(starting_image, "rb") as f:
+                img_bytes = f.read()
+
+            gemini_model = _model_name() or "gemini-2.5-flash"
+            gemini_prompt = (
+                "You are an expert prompt engineer for Google's Veo model. "
+                "Analyze the provided image and combine its content with the following motion and audio keywords "
+                "to generate a single, cohesive, and cinematic prompt. "
+                "Integrate the image's subject and scene with the requested motion and audio effects. "
+                "The final output must be ONLY the prompt itself, with no preamble. "
+                f"Mandatory Keywords: {', '.join(keywords)}"
+            )
+
+            response = client.models.generate_content(
+                model=gemini_model,
+                contents=[gemini_prompt, types.Part.from_bytes(data=img_bytes, mime_type=mime)],
+            )
+            prompt = (getattr(response, "text", "") or "").strip()
+            if prompt:
+                return prompt
+        except Exception:
+            # SDK/파일 문제 시 폴백으로 내려감
+            pass
+    # 3) 폴백: 이미지 없거나 SDK 실패 → 기존 REST 경로로 VEO 지시문 조합
+    # extracted는 dict/str 모두 가능 → 문자열화
+    extracted_text = json.dumps(extract, ensure_ascii=False) if isinstance(extract, dict) else _s(extract)
+
+    json_payload = {
+        "beforeprompt": Di.get("beforeprompt") or {},
+        "weather": Di.get("weather") or {},
+        "sample": Di.get("sample") or {}
+    }
+
+    model   = _model_name()
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    req = {"contents": [
+        {"role":"user","parts":[{"text": VEO}]},
+        {"role":"user","parts":[{"text": extracted_text}]},
+        {"role":"user","parts":[{"text": json.dumps(json_payload, ensure_ascii=False)}]}
+    ]}
 
-    extract = await extract_keyword(payload)
-    if extract != None:
+    last_err: Optional[Exception] = None
+    for i in range(3):
+        try:
+            with httpx.Client(timeout=20) as cli:
+                resp = cli.post(endpoint, json=req)
+            resp.raise_for_status()
+            data = resp.json()
+            parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+            text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
+            text  = " ".join(text.split()).strip()
 
-        Di = dict(payload) if payload else {}
-        be = (Di.get("beforeprompt") or {})
-        wt = (Di.get("weather") or {})
-        sa = (Di.get("sample") or {})
+            pf = data.get("promptFeedback") or {}
+            if not text and pf.get("blockReason"):
+                raise RuntimeError(f"Gemini blocked: {pf.get('blockReason')}")
 
-        json_payload = {
-            "beforeprompt":be,
-            "weather":wt,
-            "sample":sa
-        }
+            if not text:
+                raise RuntimeError("Empty response from Gemini REST")
+            return text
+        except Exception as e:
+            last_err = e
+            if i < 2:
+                time.sleep(0.6 * (i + 1))
+            else:
+                raise RuntimeError(f"Gemini REST failed: {e}") from e
 
-        req = {"contents": [{"role":"user","parts":[{"text":VEO}]},
-                            {"role":"user","parts":[{"text":json.dumps(extract, ensure_ascii=False)}]},
-                            {"role":"user","parts":[{"text":json.dumps(json_payload, ensure_ascii=False)}]}
-                            ]}
+        # req = {"contents": [{"role":"user","parts":[{"text":VEO}]},
+        #                     {"role":"user","parts":[{"text":json.dumps(extract, ensure_ascii=False)}]},
+        #                     {"role":"user","parts":[{"text":json.dumps(json_payload, ensure_ascii=False)}]}
+        #                     ]}
 
-        last_err: Optional[Exception] = None
-        for i in range(3):
-            try:
-                with httpx.Client(timeout=20) as cli:
-                    resp = cli.post(endpoint, json=req)
-                resp.raise_for_status()
-                data = resp.json()
-                parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
-                text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
-                text  = " ".join(text.split()).strip()
+        # last_err: Optional[Exception] = None
+        # for i in range(3):
+        #     try:
+        #         with httpx.Client(timeout=20) as cli:
+        #             resp = cli.post(endpoint, json=req)
+        #         resp.raise_for_status()
+        #         data = resp.json()
+        #         parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+        #         text  = " ".join(p.get("text","").strip() for p in parts if p.get("text"))
+        #         text  = " ".join(text.split()).strip()
 
-                # 2) safety block 여부 확인 (있으면 원인 로그)
-                pf = data.get("promptFeedback") or {}
-                if not text and pf.get("blockReason"):
-                    raise RuntimeError(f"Gemini blocked: {pf.get('blockReason')}")
+        #         # 2) safety block 여부 확인 (있으면 원인 로그)
+        #         pf = data.get("promptFeedback") or {}
+        #         if not text and pf.get("blockReason"):
+        #             raise RuntimeError(f"Gemini blocked: {pf.get('blockReason')}")
 
-                # 3) 빈 응답 방어
-                if not text:
-                    # 원문 일부라도 로깅해서 추적
-                    raise RuntimeError("Empty response from Gemini REST")
+        #         # 3) 빈 응답 방어
+        #         if not text:
+        #             # 원문 일부라도 로깅해서 추적
+        #             raise RuntimeError("Empty response from Gemini REST")
 
-                return text
-
-            except Exception as e:
-                last_err = e
-                if i < 2:
-                    time.sleep(0.6 * (i + 1))
-                else:
-                    raise RuntimeError(f"Gemini REST failed: {e}") from e
+        #         return text
