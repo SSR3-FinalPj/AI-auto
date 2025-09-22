@@ -363,9 +363,8 @@ async def enqueue_veo3_generate(
             "doneEvt": done_evt,
         }
     try:
-        extracted = await extract_keyword(job)  # llm_client의 async 함수
-        if extracted is None:
-            extracted = {}
+        extracted = await extract_keyword(job) or {}
+        job["_extracted"] = extracted
     except Exception as e:
         # 실패해도 서비스는 계속 진행: 빈 dict로 응답
         print(f"[VEO3][{req_id}] extract_keyword failed: {e}")
